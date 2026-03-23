@@ -36,16 +36,16 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Cache npm dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: npm-cache
         with:
           path: |
@@ -107,7 +107,7 @@ jobs:
           echo "✅ Coverage meets minimum threshold of $threshold%"
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./coverage/lcov.info
           flags: unittests
@@ -118,7 +118,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/
@@ -132,13 +132,13 @@ jobs:
     
     steps:
       - name: Download coverage artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-report
           path: coverage/
 
       - name: Comment on PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
@@ -218,7 +218,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
