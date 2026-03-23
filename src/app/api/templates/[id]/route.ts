@@ -50,7 +50,17 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { name, type, category, subject, content, isDefault, isActive } = body;
+    const { 
+      name, 
+      type, 
+      category, 
+      subject, 
+      body: templateBody, 
+      tone,
+      language,
+      isDefault, 
+      isActive 
+    } = body;
 
     // Vérifier que le template appartient à l'utilisateur
     const existing = await db.template.findFirst({
@@ -81,7 +91,9 @@ export async function PUT(
         type: type || existing.type,
         category: category || existing.category,
         subject: subject !== undefined ? subject : existing.subject,
-        content: content || existing.content,
+        body: templateBody || existing.body,
+        tone: tone || existing.tone,
+        language: language || existing.language,
         isDefault: isDefault !== undefined ? isDefault : existing.isDefault,
         isActive: isActive !== undefined ? isActive : existing.isActive,
       },
@@ -117,6 +129,13 @@ export async function DELETE(
 
     if (!existing) {
       return NextResponse.json({ error: "Template non trouvé" }, { status: 404 });
+    }
+
+    // Empêcher la suppression des templates par défaut
+    if (existing.isDefault) {
+      return NextResponse.json({ 
+        error: "Les templates par défaut ne peuvent pas être supprimés. Dupliquez-les pour créer une copie modifiable." 
+      }, { status: 400 });
     }
 
     await db.template.delete({

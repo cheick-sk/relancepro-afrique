@@ -1,0 +1,36 @@
+# RelancePro Africa - CodeQL Configuration
+# Custom configuration for CodeQL security analysis
+
+name: "RelancePro Africa Custom CodeQL Config"
+
+# Disable default queries and only use security queries
+queries:
+  - uses: security-and-quality
+
+# Paths to exclude from analysis
+paths-ignore:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/coverage/**'
+  - '**/test-results/**'
+  - '**/playwright-report/**'
+  - '**/*.test.ts'
+  - '**/*.test.tsx'
+  - '**/*.spec.ts'
+  - '**/*.spec.tsx'
+  - '**/__tests__/**'
+  - '**/__mocks__/**'
+  - '**/e2e/**'
+
+# Paths to include in analysis
+paths:
+  - src
+  - prisma
+
+# Query filters
+query-filters:
+  - exclude:
+      id: js/unused-local-variable
+      severity: note

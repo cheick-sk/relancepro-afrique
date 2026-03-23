@@ -18,40 +18,59 @@ interface BeforeInstallPromptEvent extends Event {
 interface PWAState {
   isInstallable: boolean;
   isInstalled: boolean;
+  canInstall: boolean;
   isOffline: boolean;
+  isOnline: boolean;
   needsUpdate: boolean;
+  updateAvailable: boolean;
   registration: ServiceWorkerRegistration | null;
 }
 
 interface PWAActions {
   promptInstall: () => Promise<boolean>;
+  install: () => Promise<boolean>;
   updateApp: () => void;
+  applyUpdate: () => void;
   clearCache: () => Promise<void>;
   cacheUrls: (urls: string[]) => Promise<void>;
+}
+
+// Helper function to get initial PWA state (called only once on mount)
+function getInitialPWAState(): PWAState {
+  if (typeof window === "undefined") {
+    return {
+      isInstallable: false,
+      isInstalled: false,
+      canInstall: false,
+      isOffline: false,
+      isOnline: true,
+      needsUpdate: false,
+      updateAvailable: false,
+      registration: null,
+    };
+  }
+
+  const isStandalone =
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (window.navigator as unknown as { standalone?: boolean }).standalone ===
+      true;
+
+  return {
+    isInstallable: false,
+    isInstalled: isStandalone,
+    canInstall: false,
+    isOffline: !navigator.onLine,
+    isOnline: navigator.onLine,
+    needsUpdate: false,
+    updateAvailable: false,
+    registration: null,
+  };
 }
 
 export function usePWA(): PWAState & PWAActions {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
-  const [state, setState] = useState<PWAState>({
-    isInstallable: false,
-    isInstalled: false,
-    isOffline: false,
-    needsUpdate: false,
-    registration: null,
-  });
-
-  // Vérifier si l'app est déjà installée
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    // Vérifier le mode standalone
-    const isStandalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-
-    setState((prev) => ({ ...prev, isInstalled: isStandalone }));
-  }, []);
+  const [state, setState] = useState<PWAState>(getInitialPWAState);
 
   // Écouter l'événement d'installation
   useEffect(() => {
@@ -61,7 +80,7 @@ export function usePWA(): PWAState & PWAActions {
       e.preventDefault();
       const promptEvent = e as BeforeInstallPromptEvent;
       setDeferredPrompt(promptEvent);
-      setState((prev) => ({ ...prev, isInstallable: true }));
+      setState((prev) => ({ ...prev, isInstallable: true, canInstall: true }));
     };
 
     const handleAppInstalled = () => {
@@ -69,6 +88,7 @@ export function usePWA(): PWAState & PWAActions {
       setState((prev) => ({
         ...prev,
         isInstallable: false,
+        canInstall: false,
         isInstalled: true,
       }));
     };
@@ -77,7 +97,10 @@ export function usePWA(): PWAState & PWAActions {
     window.addEventListener("appinstalled", handleAppInstalled);
 
     return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener(
+        "beforeinstallprompt",
+        handleBeforeInstallPrompt
+      );
       window.removeEventListener("appinstalled", handleAppInstalled);
     };
   }, []);
@@ -87,14 +110,12 @@ export function usePWA(): PWAState & PWAActions {
     if (typeof window === "undefined") return;
 
     const handleOnline = () => {
-      setState((prev) => ({ ...prev, isOffline: false }));
+      setState((prev) => ({ ...prev, isOffline: false, isOnline: true }));
     };
 
     const handleOffline = () => {
-      setState((prev) => ({ ...prev, isOffline: true }));
+      setState((prev) => ({ ...prev, isOffline: true, isOnline: false }));
     };
-
-    setState((prev) => ({ ...prev, isOffline: !navigator.onLine }));
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
@@ -128,7 +149,11 @@ export function usePWA(): PWAState & PWAActions {
                 newWorker.state === "installed" &&
                 navigator.serviceWorker.controller
               ) {
-                setState((prev) => ({ ...prev, needsUpdate: true }));
+                setState((prev) => ({
+                  ...prev,
+                  needsUpdate: true,
+                  updateAvailable: true,
+                }));
               }
             });
           }
@@ -155,7 +180,11 @@ export function usePWA(): PWAState & PWAActions {
       const { outcome } = await deferredPrompt.userChoice;
 
       setDeferredPrompt(null);
-      setState((prev) => ({ ...prev, isInstallable: false }));
+      setState((prev) => ({
+        ...prev,
+        isInstallable: false,
+        canInstall: false,
+      }));
 
       return outcome === "accepted";
     } catch (error) {
@@ -198,39 +227,50 @@ export function usePWA(): PWAState & PWAActions {
     }
   }, []);
 
+  // Alias functions for consistent API
+  const install = promptInstall;
+  const applyUpdate = updateApp;
+
   return {
     ...state,
     promptInstall,
+    install,
     updateApp,
+    applyUpdate,
     clearCache,
     cacheUrls,
   };
 }
 
+// Helper function to get initial capabilities (called only once on mount)
+function getInitialCapabilities() {
+  if (typeof window === "undefined") {
+    return {
+      serviceWorker: false,
+      pushManager: false,
+      notifications: false,
+      backgroundSync: false,
+      indexedDB: false,
+      cache: false,
+      pwaSupported: false,
+    };
+  }
+
+  return {
+    serviceWorker: "serviceWorker" in navigator,
+    pushManager: "PushManager" in window,
+    notifications: "Notification" in window,
+    backgroundSync:
+      "sync" in (window.ServiceWorkerRegistration?.prototype || {}),
+    indexedDB: "indexedDB" in window,
+    cache: "caches" in window,
+    pwaSupported: "serviceWorker" in navigator && "PushManager" in window,
+  };
+}
+
 // Hook pour vérifier les fonctionnalités PWA
 export function usePWACapabilities() {
-  const [capabilities, setCapabilities] = useState({
-    serviceWorker: false,
-    pushManager: false,
-    notifications: false,
-    backgroundSync: false,
-    indexedDB: false,
-    cache: false,
-  });
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    setCapabilities({
-      serviceWorker: "serviceWorker" in navigator,
-      pushManager: "PushManager" in window,
-      notifications: "Notification" in window,
-      backgroundSync: "sync" in (window.ServiceWorkerRegistration?.prototype || {}),
-      indexedDB: "indexedDB" in window,
-      cache: "caches" in window,
-    });
-  }, []);
-
+  const [capabilities] = useState(getInitialCapabilities);
   return capabilities;
 }
 

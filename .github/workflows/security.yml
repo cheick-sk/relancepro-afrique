@@ -1,0 +1,228 @@
+name: Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+  packages: read
+
+jobs:
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Run npm audit
+        id: audit
+        run: |
+          npm audit --audit-level=moderate --json > audit-report.json || true
+          critical=$(jq '.metadata.vulnerabilities.critical // 0' audit-report.json)
+          high=$(jq '.metadata.vulnerabilities.high // 0' audit-report.json)
+          moderate=$(jq '.metadata.vulnerabilities.moderate // 0' audit-report.json)
+          
+          echo "critical=$critical" >> $GITHUB_OUTPUT
+          echo "high=$high" >> $GITHUB_OUTPUT
+          echo "moderate=$moderate" >> $GITHUB_OUTPUT
+          
+          echo "### 🔍 NPM Audit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Critical | $critical |" >> $GITHUB_STEP_SUMMARY
+          echo "| High | $high |" >> $GITHUB_STEP_SUMMARY
+          echo "| Moderate | $moderate |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report
+          path: audit-report.json
+          retention-days: 30
+
+      - name: Fail on critical vulnerabilities
+        if: steps.audit.outputs.critical > 0
+        run: |
+          echo "::error::Found ${{ steps.audit.outputs.critical }} critical vulnerabilities!"
+          exit 1
+
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript, typescript
+          queries: security-and-quality
+          config-file: ./.github/codeql-config.yml
+        continue-on-error: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Build application
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+          upload: true
+        continue-on-error: true
+
+  secrets-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        continue-on-error: true
+
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          extra_args: --only-verified --fail
+        continue-on-error: true
+
+      - name: Check for hardcoded secrets
+        run: |
+          echo "### 🔐 Secret Scanning Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check for common secret patterns
+          found_secrets=0
+          
+          # AWS keys
+          if grep -r --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" -E "AKIA[0-9A-Z]{16}" . 2>/dev/null; then
+            echo "⚠️ Potential AWS Access Key found" >> $GITHUB_STEP_SUMMARY
+            found_secrets=1
+          fi
+          
+          # Private keys
+          if grep -r --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" -E "-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----" . 2>/dev/null; then
+            echo "⚠️ Potential Private Key found" >> $GITHUB_STEP_SUMMARY
+            found_secrets=1
+          fi
+          
+          # API keys (generic)
+          if grep -r --include="*.ts" --include="*.js" --include="*.tsx" --include="*.jsx" -E "(api[_-]?key|apikey)[\"']?\s*[:=]\s*[\"'][a-zA-Z0-9]{20,}" . --exclude-dir=node_modules --exclude-dir=.next 2>/dev/null; then
+            echo "⚠️ Potential API Key found" >> $GITHUB_STEP_SUMMARY
+            found_secrets=1
+          fi
+          
+          if [ $found_secrets -eq 0 ]; then
+            echo "✅ No hardcoded secrets found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD
+          deny-licenses: GPL-3.0, AGPL-3.0
+          comment-summary-in-pr: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          retention-days: 90
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [dependency-audit, codeql, secrets-scan]
+    if: always()
+    
+    steps:
+      - name: Generate Security Summary
+        run: |
+          echo "## 🛡️ Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Audit | ${{ needs.dependency-audit.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CodeQL Analysis | ${{ needs.codeql.result == 'success' && '✅ Passed' || '⚠️ Completed with warnings' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secret Scanning | ${{ needs.secrets-scan.result == 'success' && '✅ Passed' || '⚠️ Check results' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Last updated: $(date -u +'%Y-%m-%d %H:%M:%S UTC')_" >> $GITHUB_STEP_SUMMARY

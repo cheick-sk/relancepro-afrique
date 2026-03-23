@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { cacheOrFetch, CacheKeys, CacheTTL, invalidateUserCache } from "@/lib/cache";
+import { notifyNewDebt } from "@/lib/push/service";
+import { logDebtAction, AuditAction } from "@/lib/audit/logger";
 
 // GET - Liste des créances avec cache
 export async function GET(request: NextRequest) {
@@ -120,6 +122,32 @@ export async function POST(request: NextRequest) {
 
     // Invalider le cache des créances et clients
     await invalidateUserCache(session.user.id);
+
+    // Log audit action
+    await logDebtAction(AuditAction.DEBT_CREATED, debt.id, {
+      profileId: session.user.id,
+      clientId: client.id,
+      amount: debt.amount,
+      currency: debt.currency,
+      reference: debt.reference,
+      newValues: {
+        reference: debt.reference,
+        description: debt.description,
+        amount: debt.amount,
+        currency: debt.currency,
+        dueDate: debt.dueDate,
+        status: debt.status,
+      },
+    });
+
+    // Send push notification for new debt
+    notifyNewDebt(
+      session.user.id,
+      debt.id,
+      client.name,
+      debt.amount,
+      debt.currency
+    ).catch(err => console.error("Failed to send push notification:", err));
 
     return NextResponse.json(debt, { status: 201 });
   } catch (error) {

@@ -108,6 +108,24 @@ export default function RootLayout({
         <meta name="msapplication-TileColor" content="#f97316" />
         <meta name="msapplication-config" content="/browserconfig.xml" />
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+        {/* Service Worker Registration */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                    .then(function(registration) {
+                      console.log('SW registered: ', registration);
+                    })
+                    .catch(function(registrationError) {
+                      console.log('SW registration failed: ', registrationError);
+                    });
+                });
+              }
+            `,
+          }}
+        />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}

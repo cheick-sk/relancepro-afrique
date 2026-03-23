@@ -20,6 +20,7 @@ import {
   Clock,
   CheckCircle,
   AlertTriangle,
+  FileText,
 } from "lucide-react";
 import {
   StatusBadge,
@@ -42,12 +43,14 @@ interface ColumnOptions {
   onEdit: (debt: Debt) => void;
   onDelete: (debt: Debt) => void;
   onSendReminder: (debt: Debt, type: "email" | "whatsapp") => void;
+  onCreateInvoice?: (debt: Debt) => void;
 }
 
 export function getDebtColumns({
   onEdit,
   onDelete,
   onSendReminder,
+  onCreateInvoice,
 }: ColumnOptions): ColumnDef<DebtWithClient>[] {
   return [
     {
@@ -192,6 +195,13 @@ export function getDebtColumns({
               {!isPaid && (canSendEmail || canSendWhatsApp) && (
                 <DropdownMenuSeparator />
               )}
+              {onCreateInvoice && (
+                <DropdownMenuItem onClick={() => onCreateInvoice(debt)}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Créer une facture
+                </DropdownMenuItem>
+              )}
+              {onCreateInvoice && <DropdownMenuSeparator />}
               <DropdownMenuItem onClick={() => onEdit(debt)}>
                 <Edit className="mr-2 h-4 w-4" />
                 Modifier

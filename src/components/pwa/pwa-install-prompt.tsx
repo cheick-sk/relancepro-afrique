@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { usePWA } from "@/hooks/use-pwa";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,30 +13,31 @@ import {
   CheckCircle,
 } from "lucide-react";
 
+// Helper function to check if prompt was recently dismissed
+function wasRecentlyDismissed(): boolean {
+  if (typeof window === "undefined") return false;
+  
+  const dismissedTime = localStorage.getItem("pwa-prompt-dismissed");
+  if (dismissedTime) {
+    const hoursSinceDismissed =
+      (Date.now() - parseInt(dismissedTime)) / (1000 * 60 * 60);
+    return hoursSinceDismissed < 24;
+  }
+  return false;
+}
+
 export function PWAInstallPrompt() {
   const { isInstallable, isInstalled, isOffline, needsUpdate, promptInstall, updateApp } = usePWA();
   const [showPrompt, setShowPrompt] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
-
-  // Vérifier si le prompt a déjà été dismissed
-  useEffect(() => {
-    const dismissedTime = localStorage.getItem("pwa-prompt-dismissed");
-    if (dismissedTime) {
-      const hoursSinceDismissed =
-        (Date.now() - parseInt(dismissedTime)) / (1000 * 60 * 60);
-      if (hoursSinceDismissed < 24) {
-        setDismissed(true);
-      }
-    }
-  }, []);
+  const [wasDismissed] = useState(wasRecentlyDismissed);
 
   // Afficher le prompt après un délai
   useEffect(() => {
-    if (isInstallable && !isInstalled && !dismissed) {
+    if (isInstallable && !isInstalled && !wasDismissed) {
       const timer = setTimeout(() => setShowPrompt(true), 3000);
       return () => clearTimeout(timer);
     }
-  }, [isInstallable, isInstalled, dismissed]);
+  }, [isInstallable, isInstalled, wasDismissed]);
 
   const handleInstall = async () => {
     const installed = await promptInstall();
@@ -47,7 +48,6 @@ export function PWAInstallPrompt() {
 
   const handleDismiss = () => {
     setShowPrompt(false);
-    setDismissed(true);
     localStorage.setItem("pwa-prompt-dismissed", Date.now().toString());
   };
 
@@ -111,17 +111,22 @@ export function PWAInstallPrompt() {
 export function OfflineIndicator() {
   const { isOffline } = usePWA();
   const [showReconnected, setShowReconnected] = useState(false);
-  const [wasOffline, setWasOffline] = useState(false);
+  const wasOfflineRef = useRef(isOffline);
 
+  // Track online/offline transitions using ref to avoid cascading renders
   useEffect(() => {
-    if (isOffline) {
-      setWasOffline(true);
-    } else if (wasOffline) {
-      setShowReconnected(true);
-      const timer = setTimeout(() => setShowReconnected(false), 3000);
+    const wasOffline = wasOfflineRef.current;
+    wasOfflineRef.current = isOffline;
+    
+    if (!isOffline && wasOffline) {
+      // Just came back online - use setTimeout to defer state update
+      const timer = setTimeout(() => {
+        setShowReconnected(true);
+        setTimeout(() => setShowReconnected(false), 3000);
+      }, 0);
       return () => clearTimeout(timer);
     }
-  }, [isOffline, wasOffline]);
+  }, [isOffline]);
 
   if (isOffline) {
     return (

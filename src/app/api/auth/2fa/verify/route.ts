@@ -1,43 +1,60 @@
 /**
- * API Route: Verify and Activate Two-Factor Authentication
- * POST /api/auth/2fa/verify
+ * API Route: Two-Factor Authentication Verification
+ * POST /api/auth/2fa/verify - Verify 2FA code during login
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/config';
 import { db } from '@/lib/db';
-import { verifyTOTP, generateRecoveryCodes } from '@/lib/two-factor';
+import { verifyTOTP, verifyBackupCode, getRecoveryCodesStatus } from '@/lib/auth/two-factor';
 import { AuditAction, logAction } from '@/lib/audit';
+import { randomUUID } from 'crypto';
 
+/**
+ * POST /api/auth/2fa/verify
+ * Verify 2FA code during login
+ */
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    
-    if (!session?.user?.id) {
+    const body = await request.json();
+    const { 
+      email, 
+      code, 
+      recoveryCode, 
+      rememberDevice,
+      sessionId 
+    } = body;
+
+    // Vérifier les paramètres requis
+    if (!email) {
       return NextResponse.json(
-        { error: 'Non autorisé' },
-        { status: 401 }
+        { error: 'Email requis' },
+        { status: 400 }
       );
     }
 
-    const body = await request.json();
-    const { code, generateNewRecoveryCodes } = body;
-
-    if (!code) {
+    if (!code && !recoveryCode) {
       return NextResponse.json(
-        { error: 'Code requis' },
+        { error: 'Code 2FA ou code de récupération requis' },
         { status: 400 }
       );
     }
 
     // Récupérer l'utilisateur
     const user = await db.profile.findUnique({
-      where: { id: session.user.id },
-      select: { 
-        twoFactorEnabled: true, 
-        twoFactorBackupCodes: true,
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        companyName: true,
+        subscriptionStatus: true,
+        twoFactorEnabled: true,
         twoFactorSecret: true,
+        twoFactorBackupCodes: true,
+        teamId: true,
+        teamRole: true,
       },
     });
 
@@ -48,65 +65,128 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Vérifier le code TOTP
-    // Le secret temporaire est stocké dans twoFactorBackupCodes lors de l'initialisation
-    const secretToVerify = user.twoFactorBackupCodes;
-    
-    if (!secretToVerify) {
+    if (!user.twoFactorEnabled) {
       return NextResponse.json(
-        { error: 'Configuration 2FA non initiée. Veuillez d\'abord activer le 2FA.' },
+        { error: '2FA non activé pour ce compte' },
         { status: 400 }
       );
     }
 
-    const isValid = verifyTOTP(code, secretToVerify);
+    let isVerified = false;
+    let codesRemaining: number | undefined;
 
-    if (!isValid) {
-      await logAction({
-        userId: session.user.id,
-        action: AuditAction.TWO_FACTOR_VERIFY,
-        status: 'failed',
-        details: { reason: 'invalid_code' },
+    // Vérifier le code TOTP
+    if (code && user.twoFactorSecret) {
+      isVerified = verifyTOTP(code, user.twoFactorSecret);
+      
+      if (!isVerified) {
+        await logAction({
+          userId: user.id,
+          action: AuditAction.TWO_FACTOR_VERIFY,
+          status: 'failed',
+          details: { reason: 'invalid_totp' },
+        });
+      }
+    }
+
+    // Vérifier le code de récupération
+    if (recoveryCode && !isVerified && user.twoFactorBackupCodes) {
+      const result = verifyBackupCode(recoveryCode, user.twoFactorBackupCodes);
+      isVerified = result.valid;
+      codesRemaining = result.codesLeft;
+
+      if (isVerified) {
+        // Mettre à jour les codes de récupération restants
+        await db.profile.update({
+          where: { id: user.id },
+          data: { twoFactorBackupCodes: result.remainingCodes },
+        });
+
+        await logAction({
+          userId: user.id,
+          action: AuditAction.RECOVERY_CODE_USED,
+          status: 'success',
+          details: { codesRemaining: result.codesLeft },
+        });
+      } else {
+        await logAction({
+          userId: user.id,
+          action: AuditAction.TWO_FACTOR_VERIFY,
+          status: 'failed',
+          details: { reason: 'invalid_recovery_code' },
+        });
+      }
+    }
+
+    if (!isVerified) {
+      return NextResponse.json(
+        { error: 'Code invalide', codesRemaining },
+        { status: 400 }
+      );
+    }
+
+    // Log de la vérification réussie
+    await logAction({
+      userId: user.id,
+      action: AuditAction.TWO_FACTOR_VERIFY,
+      status: 'success',
+      details: { method: code ? 'totp' : 'recovery_code' },
+    });
+
+    // Mettre à jour la dernière connexion
+    await db.profile.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
+    // Si "se souvenir de cet appareil", créer une session de confiance
+    if (rememberDevice) {
+      const trustedToken = randomUUID();
+      const trustedUntil = new Date();
+      trustedUntil.setDate(trustedUntil.getDate() + 30); // 30 jours
+
+      await db.session.create({
+        data: {
+          userId: user.id,
+          token: trustedToken,
+          isTrusted: true,
+          trustedUntil,
+          expiresAt: trustedUntil,
+        },
       });
 
-      return NextResponse.json(
-        { error: 'Code invalide' },
-        { status: 400 }
-      );
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          companyName: user.companyName,
+          subscriptionStatus: user.subscriptionStatus,
+          twoFactorEnabled: user.twoFactorEnabled,
+          twoFactorVerified: true,
+          teamId: user.teamId,
+          teamRole: user.teamRole,
+        },
+        trustedDeviceToken: trustedToken,
+        codesRemaining,
+      });
     }
-
-    // Générer de nouveaux codes de récupération si demandé
-    let recoveryCodes: string[] | undefined;
-    let encryptedRecoveryCodes = user.twoFactorSecret; // Garder les codes existants par défaut
-
-    if (generateNewRecoveryCodes || !user.twoFactorSecret) {
-      const { codes, encrypted } = generateRecoveryCodes();
-      recoveryCodes = codes;
-      encryptedRecoveryCodes = encrypted;
-    }
-
-    // Activer le 2FA et stocker les codes de récupération
-    await db.profile.update({
-      where: { id: session.user.id },
-      data: {
-        twoFactorEnabled: true,
-        twoFactorSecret: encryptedRecoveryCodes,
-        twoFactorBackupCodes: secretToVerify, // Le secret TOTP reste stocké ici
-      },
-    });
-
-    // Log de l'action
-    await logAction({
-      userId: session.user.id,
-      action: AuditAction.TWO_FACTOR_ENABLE,
-      status: 'success',
-      details: { step: 'completed' },
-    });
 
     return NextResponse.json({
       success: true,
-      message: '2FA activé avec succès',
-      recoveryCodes, // Uniquement si de nouveaux codes ont été générés
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        companyName: user.companyName,
+        subscriptionStatus: user.subscriptionStatus,
+        twoFactorEnabled: user.twoFactorEnabled,
+        twoFactorVerified: true,
+        teamId: user.teamId,
+        teamRole: user.teamRole,
+      },
+      codesRemaining,
     });
   } catch (error) {
     console.error('Erreur lors de la vérification 2FA:', error);
@@ -118,66 +198,44 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Endpoint pour vérifier un code 2FA lors du login
+ * GET /api/auth/2fa/verify
+ * Check if 2FA is required for a user
  */
-export async function PUT(request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, code } = body;
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get('email');
 
-    if (!email || !code) {
+    if (!email) {
       return NextResponse.json(
-        { error: 'Email et code requis' },
+        { error: 'Email requis' },
         { status: 400 }
       );
     }
 
-    // Récupérer l'utilisateur
     const user = await db.profile.findUnique({
       where: { email },
-      select: { 
-        id: true,
-        twoFactorEnabled: true, 
+      select: {
+        twoFactorEnabled: true,
         twoFactorBackupCodes: true,
       },
     });
 
-    if (!user || !user.twoFactorEnabled) {
+    if (!user) {
       return NextResponse.json(
-        { error: 'Utilisateur non trouvé ou 2FA non activé' },
-        { status: 400 }
+        { error: 'Utilisateur non trouvé' },
+        { status: 404 }
       );
     }
 
-    // Vérifier le code
-    const isValid = verifyTOTP(code, user.twoFactorBackupCodes || '');
-
-    if (!isValid) {
-      await logAction({
-        userId: user.id,
-        action: AuditAction.TWO_FACTOR_VERIFY,
-        status: 'failed',
-        details: { reason: 'invalid_code_login' },
-      });
-
-      return NextResponse.json(
-        { error: 'Code invalide' },
-        { status: 400 }
-      );
-    }
-
-    await logAction({
-      userId: user.id,
-      action: AuditAction.TWO_FACTOR_VERIFY,
-      status: 'success',
-    });
+    const codesStatus = getRecoveryCodesStatus(user.twoFactorBackupCodes);
 
     return NextResponse.json({
-      success: true,
-      userId: user.id,
+      twoFactorEnabled: user.twoFactorEnabled,
+      hasRecoveryCodes: codesStatus.hasCodes,
     });
   } catch (error) {
-    console.error('Erreur lors de la vérification 2FA login:', error);
+    console.error('Erreur lors de la vérification 2FA:', error);
     return NextResponse.json(
       { error: 'Erreur serveur' },
       { status: 500 }

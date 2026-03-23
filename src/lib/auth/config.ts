@@ -6,7 +6,7 @@ import { verifyTOTP, is2FAConfigured } from "@/lib/two-factor";
 import { AuditAction, logAction } from "@/lib/audit";
 import { randomUUID } from "crypto";
 
-// Extension de la session pour inclure les informations 2FA
+// Extension de la session pour inclure les informations 2FA et équipe
 declare module "next-auth" {
   interface Session {
     user: {
@@ -17,6 +17,8 @@ declare module "next-auth" {
       subscriptionStatus: string;
       twoFactorEnabled: boolean;
       twoFactorVerified?: boolean;
+      teamId?: string | null;
+      teamRole?: string | null;
     };
   }
   interface User {
@@ -27,6 +29,8 @@ declare module "next-auth" {
     subscriptionStatus: string;
     twoFactorEnabled: boolean;
     twoFactorSecret?: string | null;
+    teamId?: string | null;
+    teamRole?: string | null;
   }
 }
 
@@ -40,6 +44,8 @@ declare module "next-auth/jwt" {
     twoFactorEnabled: boolean;
     twoFactorVerified?: boolean;
     sessionId?: string;
+    teamId?: string | null;
+    teamRole?: string | null;
   }
 }
 
@@ -197,6 +203,8 @@ export const authOptions: NextAuthOptions = {
           subscriptionStatus: profile.subscriptionStatus,
           twoFactorEnabled: profile.twoFactorEnabled,
           twoFactorVerified: true,
+          teamId: profile.teamId,
+          teamRole: profile.teamRole,
         };
       },
     }),
@@ -235,12 +243,19 @@ export const authOptions: NextAuthOptions = {
       if (token.id) {
         const profile = await db.profile.findUnique({
           where: { id: token.id },
-          select: { subscriptionStatus: true, twoFactorEnabled: true },
+          select: { 
+            subscriptionStatus: true, 
+            twoFactorEnabled: true,
+            teamId: true,
+            teamRole: true,
+          },
         });
         
         if (profile) {
           token.subscriptionStatus = profile.subscriptionStatus;
           token.twoFactorEnabled = profile.twoFactorEnabled;
+          token.teamId = profile.teamId;
+          token.teamRole = profile.teamRole;
         }
       }
 
@@ -255,6 +270,8 @@ export const authOptions: NextAuthOptions = {
         session.user.subscriptionStatus = token.subscriptionStatus;
         session.user.twoFactorEnabled = token.twoFactorEnabled;
         session.user.twoFactorVerified = token.twoFactorVerified;
+        session.user.teamId = token.teamId;
+        session.user.teamRole = token.teamRole;
       }
       return session;
     },

@@ -1,0 +1,148 @@
+version: 2
+
+updates:
+  # Enable version updates for npm
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    
+    # Limit the number of open PRs
+    open-pull-requests-limit: 10
+    
+    # Group all patch updates together
+    groups:
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+      
+      development-dependencies:
+        patterns:
+          - "@types/*"
+          - "eslint*"
+          - "prettier*"
+          - "typescript"
+          - "@testing-library/*"
+          - "vitest"
+          - "jest"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      nextjs:
+        patterns:
+          - "next"
+          - "react"
+          - "react-dom"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      prisma:
+        patterns:
+          - "prisma"
+          - "@prisma/client"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      tailwindcss:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
+          - "autoprefixer"
+          - "postcss"
+        update-types:
+          - "minor"
+          - "patch"
+    
+    # Ignore major version updates for critical packages
+    ignore:
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "prisma"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@prisma/client"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+    
+    # Add labels to PRs
+    labels:
+      - "dependencies"
+      - "automated"
+    
+    # Add reviewers
+    reviewers:
+      - "relancepro-team"
+    
+    # Commit message settings
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps(dev)"
+      include: "scope"
+    
+    # Auto-merge rules (requires branch protection settings)
+    target-branch: "develop"
+    
+    # Allow auto-merge for patch updates
+    allow:
+      - dependency-type: "all"
+    
+    # Versioning strategy
+    versioning-strategy: "increase"
+    
+    # Registries (if using private packages)
+    registries: []
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    
+    open-pull-requests-limit: 5
+    
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    
+    labels:
+      - "dependencies"
+      - "github-actions"
+    
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # Enable version updates for Docker
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    
+    open-pull-requests-limit: 5
+    
+    labels:
+      - "dependencies"
+      - "docker"
+    
+    commit-message:
+      prefix: "docker"
+      include: "scope"

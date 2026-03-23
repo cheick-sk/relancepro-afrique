@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
-import { db } from "@/lib/db";
+import { unsubscribeUser } from "@/lib/push/service";
 
-// POST - Supprimer une subscription push
+// POST - Unsubscribe from push notifications (specific endpoint)
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -21,25 +21,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Vérifier que la subscription appartient à l'utilisateur
-    const subscription = await db.pushSubscription.findFirst({
-      where: {
-        endpoint,
-        profileId: session.user.id,
-      },
-    });
+    const result = await unsubscribeUser(session.user.id, endpoint);
 
-    if (!subscription) {
+    if (!result.success) {
       return NextResponse.json(
-        { error: "Subscription non trouvée" },
-        { status: 404 }
+        { error: result.error || "Erreur lors de la suppression" },
+        { status: 500 }
       );
     }
-
-    // Supprimer la subscription
-    await db.pushSubscription.delete({
-      where: { endpoint },
-    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -51,7 +40,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// DELETE - Supprimer toutes les subscriptions de l'utilisateur
+// DELETE - Unsubscribe from all push notifications
 export async function DELETE() {
   try {
     const session = await getServerSession(authOptions);
@@ -59,9 +48,14 @@ export async function DELETE() {
       return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
     }
 
-    await db.pushSubscription.deleteMany({
-      where: { profileId: session.user.id },
-    });
+    const result = await unsubscribeUser(session.user.id);
+
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error || "Erreur lors de la suppression" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

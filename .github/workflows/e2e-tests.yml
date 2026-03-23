@@ -1,0 +1,293 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_ENV: test
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+jobs:
+  e2e:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: relancepro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/relancepro_test
+      NEXTAUTH_SECRET: test-secret-key-for-e2e
+      NEXTAUTH_URL: http://localhost:3000
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        id: npm-cache
+        with:
+          path: |
+            node_modules
+            .npm
+          key: ${{ runner.os }}-node-20-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-20-
+
+      - name: Install dependencies
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Setup test database
+        run: |
+          npx prisma migrate deploy
+          npx prisma db seed
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/relancepro_test
+
+      - name: Build application
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Run E2E tests
+        id: test
+        run: npx playwright test --reporter=list,html
+        continue-on-error: true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Upload test screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-screenshots
+          path: test-results/
+          retention-days: 30
+
+      - name: Upload test videos
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-videos
+          path: test-results/
+          retention-days: 30
+
+      - name: Check test results
+        if: steps.test.outcome == 'failure'
+        run: |
+          echo "::error::E2E tests failed. Check the uploaded artifacts for details."
+          exit 1
+
+      - name: Publish test results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read test results
+            let results = { passed: 0, failed: 0, skipped: 0 };
+            
+            try {
+              if (fs.existsSync('test-results/results.json')) {
+                results = JSON.parse(fs.readFileSync('test-results/results.json', 'utf8'));
+              }
+            } catch (e) {
+              console.log('Could not read test results');
+            }
+            
+            const summary = `## 🧪 E2E Test Results
+            
+            | Status | Count |
+            |--------|-------|
+            | ✅ Passed | ${results.passed || 'See report'} |
+            | ❌ Failed | ${results.failed || 'See report'} |
+            | ⏭️ Skipped | ${results.skipped || 'See report'} |
+            
+            [View detailed report](./playwright-report/index.html)
+            `;
+            
+            core.summary.addRaw(summary);
+            core.summary.write();
+
+  # Visual regression tests
+  visual-tests:
+    name: Visual Regression Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run visual regression tests
+        run: npx playwright test --project=visual
+        continue-on-error: true
+
+      - name: Upload visual diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diffs
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 30
+
+  # Accessibility tests
+  accessibility-tests:
+    name: Accessibility Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: relancepro_test
+        ports:
+          - 5432:5432
+    
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/relancepro_test
+      NEXTAUTH_SECRET: test-secret-key-for-a11y
+      NEXTAUTH_URL: http://localhost:3000
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Build application
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Run accessibility tests
+        run: npx playwright test --project=a11y
+        continue-on-error: true
+
+      - name: Upload accessibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accessibility-report
+          path: playwright-report/
+          retention-days: 30
+
+  # Performance tests
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run performance tests
+        run: npx playwright test --project=performance
+        continue-on-error: true
+
+      - name: Upload performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-report
+          path: |
+            playwright-report/
+            trace.zip
+          retention-days: 30
+
+      - name: Comment performance metrics
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            // Add performance metrics comment
+            const body = `## ⚡ Performance Test Results
+            
+            Performance tests completed. Check the uploaded artifacts for detailed metrics.
+            `;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });

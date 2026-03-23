@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -15,6 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Bold,
   Italic,
@@ -22,106 +23,161 @@ import {
   List,
   ListOrdered,
   Link2,
-  Eye,
-  Code,
-  Variable,
   Mail,
   MessageSquare,
   Save,
   Send,
-  Undo,
-  Redo,
+  Smartphone,
+  AlertCircle,
+  Check,
+  Copy,
+  Sparkles,
+  FileText,
+  Clock,
+  Globe,
+  Palette,
 } from "lucide-react";
 import { toast } from "sonner";
-
-// Variables disponibles pour les templates
-export const TEMPLATE_VARIABLES = [
-  { key: "client_name", label: "Nom du client", example: "Jean Dupont" },
-  { key: "client_company", label: "Entreprise du client", example: "ACME SARL" },
-  { key: "amount", label: "Montant dû", example: "1 500 000 GNF" },
-  { key: "remaining_amount", label: "Montant restant", example: "1 200 000 GNF" },
-  { key: "paid_amount", label: "Montant payé", example: "300 000 GNF" },
-  { key: "due_date", label: "Date d'échéance", example: "15 janvier 2025" },
-  { key: "days_overdue", label: "Jours de retard", example: "45" },
-  { key: "reference", label: "Référence", example: "FAC-2025-001" },
-  { key: "description", label: "Description", example: "Prestation de consulting" },
-  { key: "company_name", label: "Votre entreprise", example: "Ma Société" },
-  { key: "current_date", label: "Date actuelle", example: "20 janvier 2025" },
-];
+import {
+  TEMPLATE_VARIABLES,
+  replaceVariables,
+  getCharacterInfo,
+  validateVariables,
+  VARIABLE_CATEGORIES,
+} from "@/lib/templates/variables";
+import {
+  TemplateType,
+  TemplateCategory,
+  TemplateCreate,
+  TemplateTone,
+  TemplateLanguage,
+  CATEGORY_LABELS,
+  CATEGORY_DESCRIPTIONS,
+  TONE_LABELS,
+  TONE_DESCRIPTIONS,
+  TONE_COLORS,
+  LANGUAGE_LABELS,
+  LANGUAGE_FLAGS,
+} from "@/lib/templates/types";
+import {
+  getDefaultTemplatesByType,
+  getInitialTemplatesForNewUser,
+} from "@/lib/templates/default-templates";
+import { TemplatePreview } from "./template-preview";
+import { VariableInserter, VariableInserterCompact } from "./variable-inserter";
 
 interface Template {
   id?: string;
   name: string;
-  type: "email" | "whatsapp";
-  category: string;
-  subject?: string;
-  content: string;
+  type: TemplateType;
+  category: TemplateCategory;
+  subject?: string | null;
+  body: string;
+  tone?: TemplateTone;
+  language?: TemplateLanguage;
   isDefault?: boolean;
   isActive?: boolean;
+  usageCount?: number;
 }
 
 interface TemplateEditorProps {
   template?: Template;
-  onSave: (template: Template) => Promise<void>;
-  onTestSend?: (template: Template) => Promise<void>;
+  onSave: (template: TemplateCreate) => Promise<void>;
+  onTestSend?: (template: TemplateCreate) => Promise<void>;
   isLoading?: boolean;
 }
 
 export function TemplateEditor({ template, onSave, onTestSend, isLoading }: TemplateEditorProps) {
   const [name, setName] = useState(template?.name || "");
-  const [type, setType] = useState<"email" | "whatsapp">(template?.type || "email");
-  const [category, setCategory] = useState(template?.category || "reminder1");
+  const [type, setType] = useState<TemplateType>(template?.type || "email");
+  const [category, setCategory] = useState<TemplateCategory>(template?.category as TemplateCategory || "reminder1");
   const [subject, setSubject] = useState(template?.subject || "");
-  const [content, setContent] = useState(template?.content || "");
-  const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit");
+  const [body, setBody] = useState(template?.body || "");
+  const [tone, setTone] = useState<TemplateTone>(template?.tone || "formal");
+  const [language, setLanguage] = useState<TemplateLanguage>(template?.language || "fr");
+  const [isDefault, setIsDefault] = useState(template?.isDefault || false);
   const [saving, setSaving] = useState(false);
+  const [autosaveStatus, setAutosaveStatus] = useState<"saved" | "saving" | "unsaved" | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const subjectRef = useRef<HTMLInputElement>(null);
+
+  // Character count info
+  const charInfo = getCharacterInfo(body, type);
+  const subjectCharInfo = type === 'email' ? {
+    count: subject.length,
+    max: 78,
+    warning: 60,
+    isOverLimit: subject.length > 78,
+    isNearLimit: subject.length > 60 && subject.length <= 78,
+  } : null;
+
+  // Variable validation
+  const variableValidation = validateVariables(body);
 
   useEffect(() => {
     if (template) {
       setName(template.name);
-      setType(template.type as "email" | "whatsapp");
-      setCategory(template.category);
+      setType(template.type);
+      setCategory(template.category as TemplateCategory);
       setSubject(template.subject || "");
-      setContent(template.content);
+      setBody(template.body);
+      setTone(template.tone || "formal");
+      setLanguage(template.language || "fr");
+      setIsDefault(template.isDefault || false);
     }
   }, [template]);
 
-  // Insérer une variable dans le contenu
-  const insertVariable = (variableKey: string) => {
-    const textarea = document.getElementById("template-content") as HTMLTextAreaElement;
-    if (!textarea) return;
+  // Insert variable at cursor position
+  const insertVariable = useCallback((variableKey: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setBody(prev => prev + `{${variableKey}}`);
+      return;
+    }
 
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
     const variable = `{${variableKey}}`;
-    const newContent = content.substring(0, start) + variable + content.substring(end);
-    setContent(newContent);
+    const newContent = body.substring(0, start) + variable + body.substring(end);
+    setBody(newContent);
+    setAutosaveStatus("unsaved");
 
-    // Repositionner le curseur après la variable
+    // Reposition cursor after the variable
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(start + variable.length, start + variable.length);
     }, 0);
-  };
+  }, [body]);
 
-  // Remplacer les variables par leurs exemples pour la prévisualisation
-  const getPreviewContent = (text: string) => {
-    let preview = text;
-    TEMPLATE_VARIABLES.forEach((v) => {
-      const regex = new RegExp(`\\{${v.key}\\}`, "g");
-      preview = preview.replace(regex, v.example);
-    });
-    return preview;
-  };
+  // Insert variable in subject
+  const insertVariableInSubject = useCallback((variableKey: string) => {
+    const input = subjectRef.current;
+    if (!input) {
+      setSubject(prev => prev + `{${variableKey}}`);
+      return;
+    }
 
-  // Appliquer un formatage simple (Markdown-like)
-  const applyFormat = (format: "bold" | "italic" | "underline" | "list" | "ordered" | "link") => {
-    const textarea = document.getElementById("template-content") as HTMLTextAreaElement;
+    const start = input.selectionStart ?? subject.length;
+    const end = input.selectionEnd ?? subject.length;
+    const variable = `{${variableKey}}`;
+    const newSubject = subject.substring(0, start) + variable + subject.substring(end);
+    setSubject(newSubject);
+    setAutosaveStatus("unsaved");
+
+    setTimeout(() => {
+      input.focus();
+      input.setSelectionRange(start + variable.length, start + variable.length);
+    }, 0);
+  }, [subject]);
+
+  // Apply markdown formatting
+  const applyFormat = useCallback((format: "bold" | "italic" | "underline" | "list" | "ordered" | "link") => {
+    const textarea = textareaRef.current;
     if (!textarea) return;
 
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selectedText = content.substring(start, end);
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    const selectedText = body.substring(start, end);
     let formattedText = selectedText;
 
     switch (format) {
@@ -145,16 +201,31 @@ export function TemplateEditor({ template, onSave, onTestSend, isLoading }: Temp
         break;
     }
 
-    const newContent = content.substring(0, start) + formattedText + content.substring(end);
-    setContent(newContent);
-  };
+    const newContent = body.substring(0, start) + formattedText + body.substring(end);
+    setBody(newContent);
+    setAutosaveStatus("unsaved");
+  }, [body]);
+
+  // Load default template
+  const loadDefaultTemplate = useCallback((templateCategory: TemplateCategory, templateTone: TemplateTone, templateLanguage: TemplateLanguage) => {
+    const templates = getDefaultTemplatesByType(type, templateLanguage);
+    const t = templates.find(d => d.category === templateCategory && d.tone === templateTone);
+    if (t) {
+      setCategory(templateCategory);
+      setTone(templateTone);
+      setLanguage(templateLanguage);
+      setSubject(t.subject);
+      setBody(t.body);
+      setAutosaveStatus("unsaved");
+    }
+  }, [type]);
 
   const handleSave = async () => {
     if (!name.trim()) {
       toast.error("Le nom du template est requis");
       return;
     }
-    if (!content.trim()) {
+    if (!body.trim()) {
       toast.error("Le contenu du template est requis");
       return;
     }
@@ -163,22 +234,32 @@ export function TemplateEditor({ template, onSave, onTestSend, isLoading }: Temp
       return;
     }
 
+    // Check for invalid variables
+    const validation = validateVariables(body);
+    if (validation.invalid.length > 0) {
+      toast.error(`Variables invalides: ${validation.invalid.map(v => `{${v}}`).join(', ')}`);
+      return;
+    }
+
     setSaving(true);
+    setAutosaveStatus("saving");
     try {
       await onSave({
-        id: template?.id,
         name,
         type,
         category,
         subject: type === "email" ? subject : undefined,
-        content,
-        isDefault: template?.isDefault,
-        isActive: template?.isActive,
+        body,
+        tone,
+        language,
+        isDefault,
       });
       toast.success("Template enregistré avec succès");
+      setAutosaveStatus("saved");
     } catch (error) {
       console.error("Error saving template:", error);
       toast.error("Erreur lors de l'enregistrement");
+      setAutosaveStatus("unsaved");
     } finally {
       setSaving(false);
     }
@@ -193,7 +274,9 @@ export function TemplateEditor({ template, onSave, onTestSend, isLoading }: Temp
         type,
         category,
         subject: type === "email" ? subject : undefined,
-        content,
+        body,
+        tone,
+        language,
       });
       toast.success("Test envoyé avec succès");
     } catch (error) {
@@ -202,76 +285,60 @@ export function TemplateEditor({ template, onSave, onTestSend, isLoading }: Temp
     }
   };
 
-  // Templates par défaut
-  const loadDefaultTemplate = (templateType: "reminder1" | "reminder2" | "reminder3") => {
-    const templates: Record<string, { subject: string; content: string }> = {
-      reminder1: {
-        subject: "Rappel : Facture {reference} en attente de paiement",
-        content: `Bonjour {client_name},
-
-Nous espérons que vous allez bien.
-
-Nous vous rappelons que la facture {reference} d'un montant de {amount} est arrivée à échéance le {due_date}.
-
-Nous vous prions de bien vouloir procéder au paiement dans les meilleurs délais.
-
-En cas de difficulté ou pour toute question, n'hésitez pas à nous contacter.
-
-Cordialement,
-{company_name}`,
-      },
-      reminder2: {
-        subject: "Deuxième rappel : Facture {reference} - Action requise",
-        content: `Bonjour {client_name},
-
-Malgré notre précédent rappel, nous n'avons toujours pas reçu le paiement de la facture {reference} d'un montant de {remaining_amount}.
-
-Cette facture est en retard de {days_overdue} jours.
-
-Nous vous invitons à régulariser cette situation dans les plus brefs délais pour éviter d'éventuels frais de retard.
-
-Merci de votre compréhension.
-
-Cordialement,
-{company_name}`,
-      },
-      reminder3: {
-        subject: "Dernier rappel : Facture {reference} - Urgent",
-        content: `Bonjour {client_name},
-
-Nous vous contactons pour la troisième fois concernant la facture {reference} d'un montant de {remaining_amount}, en retard de {days_overdue} jours.
-
-À défaut de règlement sous 7 jours, nous serons contraints de procéder à des actions de recouvrement.
-
-Nous restons à votre disposition pour trouver une solution amiable.
-
-Cordialement,
-{company_name}`,
-      },
-    };
-
-    const t = templates[templateType];
-    setCategory(templateType);
-    setSubject(t.subject);
-    setContent(t.content);
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(body);
+    toast.success("Contenu copié dans le presse-papiers");
   };
 
   return (
     <div className="space-y-4">
-      {/* Informations de base */}
-      <div className="grid gap-4 md:grid-cols-3">
+      {/* Autosave indicator */}
+      {autosaveStatus && (
+        <div className="flex items-center justify-end gap-2 text-xs">
+          {autosaveStatus === "saving" && (
+            <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+              <Clock className="mr-1 h-3 w-3 animate-pulse" />
+              Enregistrement...
+            </Badge>
+          )}
+          {autosaveStatus === "saved" && (
+            <Badge variant="secondary" className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+              <Check className="mr-1 h-3 w-3" />
+              Enregistré
+            </Badge>
+          )}
+          {autosaveStatus === "unsaved" && (
+            <Badge variant="secondary" className="bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300">
+              <AlertCircle className="mr-1 h-3 w-3" />
+              Modifications non enregistrées
+            </Badge>
+          )}
+        </div>
+      )}
+
+      {/* Basic Information */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <div className="space-y-2">
           <Label htmlFor="name">Nom du template</Label>
           <Input
             id="name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              setAutosaveStatus("unsaved");
+            }}
             placeholder="Ex: Rappel 1 - Standard"
           />
         </div>
         <div className="space-y-2">
           <Label>Type</Label>
-          <Select value={type} onValueChange={(v) => setType(v as "email" | "whatsapp")}>
+          <Select 
+            value={type} 
+            onValueChange={(v) => {
+              setType(v as TemplateType);
+              setAutosaveStatus("unsaved");
+            }}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -288,185 +355,281 @@ Cordialement,
                   WhatsApp
                 </div>
               </SelectItem>
+              <SelectItem value="sms">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="h-4 w-4" />
+                  SMS
+                </div>
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-2">
           <Label>Catégorie</Label>
-          <Select value={category} onValueChange={(v) => setCategory(v)}>
+          <Select 
+            value={category} 
+            onValueChange={(v) => {
+              setCategory(v as TemplateCategory);
+              setAutosaveStatus("unsaved");
+            }}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="reminder1">Rappel 1 (1ère relance)</SelectItem>
-              <SelectItem value="reminder2">Rappel 2 (2ème relance)</SelectItem>
-              <SelectItem value="reminder3">Rappel 3 (Dernière relance)</SelectItem>
-              <SelectItem value="custom">Personnalisé</SelectItem>
+              {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
+                <SelectItem key={key} value={key}>
+                  <div>
+                    <div>{label}</div>
+                    <div className="text-xs text-gray-500">{CATEGORY_DESCRIPTIONS[key as TemplateCategory]}</div>
+                  </div>
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      {/* Charger un template par défaut */}
-      <div className="flex gap-2">
-        <span className="text-sm text-gray-500">Charger un modèle :</span>
-        <Button
-          variant="link"
-          size="sm"
-          className="h-auto p-0 text-orange-600"
-          onClick={() => loadDefaultTemplate("reminder1")}
-        >
-          Rappel 1
-        </Button>
-        <Button
-          variant="link"
-          size="sm"
-          className="h-auto p-0 text-orange-600"
-          onClick={() => loadDefaultTemplate("reminder2")}
-        >
-          Rappel 2
-        </Button>
-        <Button
-          variant="link"
-          size="sm"
-          className="h-auto p-0 text-orange-600"
-          onClick={() => loadDefaultTemplate("reminder3")}
-        >
-          Rappel 3
-        </Button>
+      {/* Tone and Language */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label className="flex items-center gap-2">
+            <Palette className="h-4 w-4" />
+            Ton du message
+          </Label>
+          <Select 
+            value={tone} 
+            onValueChange={(v) => {
+              setTone(v as TemplateTone);
+              setAutosaveStatus("unsaved");
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(TONE_LABELS).map(([key, label]) => (
+                <SelectItem key={key} value={key}>
+                  <div className="flex items-center gap-2">
+                    <Badge className={TONE_COLORS[key as TemplateTone]}>
+                      {label}
+                    </Badge>
+                    <span className="text-xs text-gray-500">
+                      {TONE_DESCRIPTIONS[key as TemplateTone]}
+                    </span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label className="flex items-center gap-2">
+            <Globe className="h-4 w-4" />
+            Langue
+          </Label>
+          <Select 
+            value={language} 
+            onValueChange={(v) => {
+              setLanguage(v as TemplateLanguage);
+              setAutosaveStatus("unsaved");
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(LANGUAGE_LABELS).map(([key, label]) => (
+                <SelectItem key={key} value={key}>
+                  <div className="flex items-center gap-2">
+                    <span>{LANGUAGE_FLAGS[key as TemplateLanguage]}</span>
+                    <span>{label}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      {/* Objet (email uniquement) */}
+      {/* Quick Load Templates */}
+      <div className="flex flex-wrap items-center gap-2 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+        <span className="text-sm text-gray-500 flex items-center gap-1">
+          <Sparkles className="h-4 w-4" />
+          Charger un modèle :
+        </span>
+        <div className="flex flex-wrap gap-1">
+          {getDefaultTemplatesByType(type, language).slice(0, 3).map((t) => (
+            <Button
+              key={`${t.category}-${t.tone}`}
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => loadDefaultTemplate(t.category, t.tone, t.language)}
+            >
+              {t.name}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {/* Subject (email only) */}
       {type === "email" && (
         <div className="space-y-2">
-          <Label htmlFor="subject">Objet de l&apos;email</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="subject">Objet de l&apos;email</Label>
+            <div className="flex items-center gap-2">
+              <VariableInserterCompact onInsert={insertVariableInSubject} />
+              {subjectCharInfo && (
+                <span className={`text-xs ${subjectCharInfo.isOverLimit ? 'text-red-500' : subjectCharInfo.isNearLimit ? 'text-orange-500' : 'text-gray-400'}`}>
+                  {subjectCharInfo.count}/{subjectCharInfo.max}
+                </span>
+              )}
+            </div>
+          </div>
           <Input
+            ref={subjectRef}
             id="subject"
             value={subject}
-            onChange={(e) => setSubject(e.target.value)}
+            onChange={(e) => {
+              setSubject(e.target.value);
+              setAutosaveStatus("unsaved");
+            }}
             placeholder="Ex: Rappel : Facture en attente de paiement"
+            className={subjectCharInfo?.isOverLimit ? 'border-red-500' : ''}
           />
         </div>
       )}
 
-      {/* Variables disponibles */}
-      <Card>
-        <CardHeader className="py-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Variable className="h-4 w-4" />
-            Variables disponibles
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Cliquez sur une variable pour l&apos;insérer dans le texte
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="py-2">
-          <div className="flex flex-wrap gap-2">
-            {TEMPLATE_VARIABLES.map((v) => (
-              <Button
-                key={v.key}
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => insertVariable(v.key)}
-              >
-                {v.label}
+      {/* Main Editor with Preview */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Editor Panel */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Contenu du message</Label>
+            <div className="flex items-center gap-2">
+              <VariableInserter onInsert={insertVariable} />
+              <Button variant="ghost" size="sm" onClick={copyToClipboard}>
+                <Copy className="h-4 w-4" />
               </Button>
-            ))}
+            </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Éditeur avec tabs */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "edit" | "preview")}>
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="edit" className="flex items-center gap-1">
-              <Code className="h-4 w-4" />
-              Éditer
-            </TabsTrigger>
-            <TabsTrigger value="preview" className="flex items-center gap-1">
-              <Eye className="h-4 w-4" />
-              Prévisualiser
-            </TabsTrigger>
-          </TabsList>
+          {/* Formatting Toolbar (for email) */}
+          {type === 'email' && (
+            <div className="flex items-center gap-1 p-2 border rounded-t-lg bg-gray-50 dark:bg-gray-900">
+              <Button variant="ghost" size="sm" onClick={() => applyFormat("bold")} title="Gras">
+                <Bold className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => applyFormat("italic")} title="Italique">
+                <Italic className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => applyFormat("underline")} title="Souligné">
+                <Underline className="h-4 w-4" />
+              </Button>
+              <div className="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-1" />
+              <Button variant="ghost" size="sm" onClick={() => applyFormat("list")} title="Liste">
+                <List className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => applyFormat("ordered")} title="Liste numérotée">
+                <ListOrdered className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => applyFormat("link")} title="Lien">
+                <Link2 className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
 
-          {/* Barre d'outils */}
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" onClick={() => applyFormat("bold")} title="Gras">
-              <Bold className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => applyFormat("italic")} title="Italique">
-              <Italic className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => applyFormat("underline")} title="Souligné">
-              <Underline className="h-4 w-4" />
-            </Button>
-            <div className="w-px h-4 bg-gray-300 mx-1" />
-            <Button variant="ghost" size="sm" onClick={() => applyFormat("list")} title="Liste">
-              <List className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => applyFormat("ordered")} title="Liste numérotée">
-              <ListOrdered className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => applyFormat("link")} title="Lien">
-              <Link2 className="h-4 w-4" />
-            </Button>
+          {/* Textarea */}
+          <Textarea
+            ref={textareaRef}
+            value={body}
+            onChange={(e) => {
+              setBody(e.target.value);
+              setAutosaveStatus("unsaved");
+            }}
+            placeholder="Rédigez votre template ici. Utilisez les variables {client_name}, {debt_amount}, etc."
+            className={`min-h-[300px] font-mono text-sm ${type === 'email' ? 'rounded-t-none' : ''} ${charInfo.isOverLimit ? 'border-red-500' : ''}`}
+          />
+
+          {/* Character Count */}
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              {variableValidation.invalid.length > 0 ? (
+                <Badge variant="destructive" className="text-xs">
+                  <AlertCircle className="mr-1 h-3 w-3" />
+                  Variables invalides: {variableValidation.invalid.join(', ')}
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                  <Check className="mr-1 h-3 w-3" />
+                  {variableValidation.valid.length} variables valides
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-4">
+              {type === 'sms' && charInfo.segments && charInfo.segments > 1 && (
+                <span className="text-orange-500">
+                  {charInfo.segments} SMS
+                </span>
+              )}
+              <span className={`${charInfo.isOverLimit ? 'text-red-500' : charInfo.isNearLimit ? 'text-orange-500' : 'text-gray-400'}`}>
+                {charInfo.count} / {charInfo.max} caractères
+              </span>
+            </div>
           </div>
         </div>
 
-        <TabsContent value="edit" className="mt-4">
-          <Textarea
-            id="template-content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Rédigez votre template ici. Utilisez les variables {client_name}, {amount}, etc."
-            className="min-h-[300px] font-mono text-sm"
+        {/* Preview Panel */}
+        <div className="space-y-2">
+          <Label>Aperçu</Label>
+          <TemplatePreview
+            subject={type === 'email' ? subject : undefined}
+            body={body}
+            type={type}
           />
-        </TabsContent>
+        </div>
+      </div>
 
-        <TabsContent value="preview" className="mt-4">
-          <Card className="bg-gray-50 dark:bg-gray-900">
-            <CardContent className="p-4">
-              {type === "email" && (
-                <div className="mb-4 pb-4 border-b">
-                  <p className="text-sm text-gray-500">Objet :</p>
-                  <p className="font-medium">{getPreviewContent(subject)}</p>
-                </div>
-              )}
-              <div className="whitespace-pre-wrap text-sm">
-                {getPreviewContent(content)}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {/* Options */}
+      <div className="flex items-center justify-between rounded-lg border p-4">
+        <div className="flex items-center gap-2">
+          <Switch
+            id="is-default"
+            checked={isDefault}
+            onCheckedChange={(checked) => {
+              setIsDefault(checked);
+              setAutosaveStatus("unsaved");
+            }}
+          />
+          <Label htmlFor="is-default" className="cursor-pointer">
+            Template par défaut pour {CATEGORY_LABELS[category]}
+          </Label>
+        </div>
+        {template?.id && (
+          <Badge variant="outline">
+            <FileText className="mr-1 h-3 w-3" />
+            Utilisé {template.usageCount || 0} fois
+          </Badge>
+        )}
+      </div>
 
       {/* Actions */}
-      <div className="flex justify-between pt-4 border-t">
-        <div className="flex gap-2">
-          {template?.id && (
-            <Badge variant="outline">
-              Utilisé {template?.isDefault ? "0" : "0"} fois
-            </Badge>
-          )}
-        </div>
-        <div className="flex gap-2">
-          {onTestSend && (
-            <Button variant="outline" onClick={handleTestSend} disabled={isLoading || saving}>
-              <Send className="mr-2 h-4 w-4" />
-              Tester l&apos;envoi
-            </Button>
-          )}
-          <Button
-            className="bg-orange-500 hover:bg-orange-600"
-            onClick={handleSave}
-            disabled={isLoading || saving}
-          >
-            <Save className="mr-2 h-4 w-4" />
-            Enregistrer
+      <div className="flex justify-end gap-2 pt-4 border-t">
+        {onTestSend && (
+          <Button variant="outline" onClick={handleTestSend} disabled={isLoading || saving}>
+            <Send className="mr-2 h-4 w-4" />
+            Tester l&apos;envoi
           </Button>
-        </div>
+        )}
+        <Button
+          className="bg-orange-500 hover:bg-orange-600"
+          onClick={handleSave}
+          disabled={isLoading || saving}
+        >
+          <Save className="mr-2 h-4 w-4" />
+          Enregistrer
+        </Button>
       </div>
     </div>
   );

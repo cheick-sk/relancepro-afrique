@@ -7,8 +7,14 @@ import { Bell, X, CheckCircle2, AlertCircle } from "lucide-react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { toast } from "sonner";
 
+// Helper function to check if banner was previously dismissed
+function wasBannerDismissed(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem("push-banner-dismissed") === "true";
+}
+
 export function PushPermissionBanner() {
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(wasBannerDismissed);
   const [isAnimating, setIsAnimating] = useState(false);
   const {
     isSupported,
@@ -17,14 +23,6 @@ export function PushPermissionBanner() {
     isLoading,
     subscribe,
   } = usePushNotifications();
-
-  // Vérifier si le banner a été précédemment fermé
-  useEffect(() => {
-    const wasDismissed = localStorage.getItem("push-banner-dismissed");
-    if (wasDismissed) {
-      setDismissed(true);
-    }
-  }, []);
 
   // Ne pas afficher si:
   // - Pas supporté

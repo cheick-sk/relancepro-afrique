@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
-import { db } from "@/lib/db";
+import { 
+  subscribeUser, 
+  unsubscribeUser, 
+  getUserSubscriptions,
+  getUserPreferences,
+  updateUserPreferences,
+  type PushSubscriptionData,
+  type NotificationPreferences,
+} from "@/lib/push/service";
+import { getVapidConfig } from "@/lib/push/config";
 
-// POST - Enregistrer une nouvelle subscription push
+// POST - Save push subscription
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -12,7 +21,21 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { endpoint, p256dh, auth, userAgent, deviceType, notifyReminders, notifyPayments, notifyAlerts } = body;
+    const { 
+      endpoint, 
+      p256dh, 
+      auth, 
+      userAgent, 
+      deviceType,
+      // Preferences
+      notifyPaymentReminders,
+      notifyNewDebts,
+      notifyRemindersSent,
+      notifySubscription,
+      soundEnabled,
+      quietHoursStart,
+      quietHoursEnd,
+    } = body;
 
     if (!endpoint || !p256dh || !auth) {
       return NextResponse.json(
@@ -21,44 +44,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Vérifier si cette subscription existe déjà
-    const existing = await db.pushSubscription.findUnique({
-      where: { endpoint },
-    });
+    const subscriptionData: PushSubscriptionData = {
+      endpoint,
+      p256dh,
+      auth,
+      userAgent,
+      deviceType,
+    };
 
-    if (existing) {
-      // Mettre à jour la subscription existante
-      const updated = await db.pushSubscription.update({
-        where: { endpoint },
-        data: {
-          p256dh,
-          auth,
-          userAgent: userAgent || existing.userAgent,
-          deviceType: deviceType || existing.deviceType,
-          notifyReminders: notifyReminders ?? existing.notifyReminders,
-          notifyPayments: notifyPayments ?? existing.notifyPayments,
-          notifyAlerts: notifyAlerts ?? existing.notifyAlerts,
-        },
-      });
-      return NextResponse.json(updated);
+    const preferences: Partial<NotificationPreferences> = {
+      paymentReminders: notifyPaymentReminders,
+      newDebts: notifyNewDebts,
+      remindersSent: notifyRemindersSent,
+      subscription: notifySubscription,
+      soundEnabled,
+      quietHoursStart,
+      quietHoursEnd,
+    };
+
+    const result = await subscribeUser(session.user.id, subscriptionData, preferences);
+
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error || "Erreur lors de l'enregistrement" },
+        { status: 500 }
+      );
     }
 
-    // Créer une nouvelle subscription
-    const subscription = await db.pushSubscription.create({
-      data: {
-        profileId: session.user.id,
-        endpoint,
-        p256dh,
-        auth,
-        userAgent,
-        deviceType,
-        notifyReminders: notifyReminders ?? true,
-        notifyPayments: notifyPayments ?? true,
-        notifyAlerts: notifyAlerts ?? true,
-      },
+    return NextResponse.json({ 
+      success: true, 
+      subscriptionId: result.subscriptionId 
     });
-
-    return NextResponse.json(subscription);
   } catch (error) {
     console.error("Error saving push subscription:", error);
     return NextResponse.json(
@@ -68,7 +84,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET - Récupérer les subscriptions de l'utilisateur
+// GET - Get user's subscriptions and preferences
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
@@ -76,16 +92,87 @@ export async function GET() {
       return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
     }
 
-    const subscriptions = await db.pushSubscription.findMany({
-      where: { profileId: session.user.id },
-      orderBy: { createdAt: "desc" },
-    });
+    const subscriptions = await getUserSubscriptions(session.user.id);
+    const preferences = await getUserPreferences(session.user.id);
+    const vapidConfig = getVapidConfig();
 
-    return NextResponse.json(subscriptions);
+    return NextResponse.json({
+      subscriptions,
+      preferences,
+      vapidPublicKey: vapidConfig.publicKey,
+    });
   } catch (error) {
     console.error("Error fetching push subscriptions:", error);
     return NextResponse.json(
       { error: "Erreur lors de la récupération des subscriptions" },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE - Remove subscription(s)
+export async function DELETE(request: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const endpoint = searchParams.get("endpoint");
+
+    const result = await unsubscribeUser(session.user.id, endpoint || undefined);
+
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error || "Erreur lors de la suppression" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Error removing push subscription:", error);
+    return NextResponse.json(
+      { error: "Erreur lors de la suppression de la subscription" },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT - Update notification preferences
+export async function PUT(request: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const preferences: Partial<NotificationPreferences> = {
+      paymentReminders: body.notifyPaymentReminders,
+      newDebts: body.notifyNewDebts,
+      remindersSent: body.notifyRemindersSent,
+      subscription: body.notifySubscription,
+      soundEnabled: body.soundEnabled,
+      quietHoursStart: body.quietHoursStart,
+      quietHoursEnd: body.quietHoursEnd,
+    };
+
+    const result = await updateUserPreferences(session.user.id, preferences);
+
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error || "Erreur lors de la mise à jour" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Error updating push preferences:", error);
+    return NextResponse.json(
+      { error: "Erreur lors de la mise à jour des préférences" },
       { status: 500 }
     );
   }

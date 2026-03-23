@@ -1,16 +1,20 @@
 /**
  * API Route: Disable Two-Factor Authentication
- * POST /api/auth/2fa/disable
+ * POST /api/auth/2fa/disable - Disable 2FA (requires password or code)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/config';
 import { db } from '@/lib/db';
-import { verifyTOTP, verifyRecoveryCode } from '@/lib/two-factor';
+import { verifyTOTP, verifyBackupCode, disable2FA } from '@/lib/auth/two-factor';
 import { AuditAction, logAction } from '@/lib/audit';
 import { compare } from 'bcryptjs';
 
+/**
+ * POST /api/auth/2fa/disable
+ * Disable 2FA (requires password and optionally 2FA code)
+ */
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -28,7 +32,7 @@ export async function POST(request: NextRequest) {
     // Mot de passe requis pour désactiver le 2FA
     if (!password) {
       return NextResponse.json(
-        { error: 'Mot de passe requis' },
+        { error: 'Mot de passe requis pour désactiver le 2FA' },
         { status: 400 }
       );
     }
@@ -39,8 +43,8 @@ export async function POST(request: NextRequest) {
       select: { 
         password: true,
         twoFactorEnabled: true, 
-        twoFactorBackupCodes: true,
         twoFactorSecret: true,
+        twoFactorBackupCodes: true,
       },
     });
 
@@ -61,6 +65,13 @@ export async function POST(request: NextRequest) {
 
     const isPasswordValid = await compare(password, user.password);
     if (!isPasswordValid) {
+      await logAction({
+        userId: session.user.id,
+        action: AuditAction.TWO_FACTOR_DISABLE,
+        status: 'failed',
+        details: { reason: 'invalid_password' },
+      });
+
       return NextResponse.json(
         { error: 'Mot de passe incorrect' },
         { status: 400 }
@@ -77,8 +88,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Vérifier le code TOTP
-      if (code && user.twoFactorBackupCodes) {
-        const isValid = verifyTOTP(code, user.twoFactorBackupCodes);
+      if (code && user.twoFactorSecret) {
+        const isValid = verifyTOTP(code, user.twoFactorSecret);
         if (!isValid) {
           await logAction({
             userId: session.user.id,
@@ -95,8 +106,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Vérifier le code de récupération
-      if (recoveryCode && user.twoFactorSecret) {
-        const result = verifyRecoveryCode(recoveryCode, user.twoFactorSecret);
+      if (recoveryCode && user.twoFactorBackupCodes) {
+        const result = verifyBackupCode(recoveryCode, user.twoFactorBackupCodes);
         if (!result.valid) {
           await logAction({
             userId: session.user.id,
@@ -114,25 +125,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Désactiver le 2FA
-    await db.profile.update({
-      where: { id: session.user.id },
-      data: {
-        twoFactorEnabled: false,
-        twoFactorBackupCodes: null,
-        twoFactorSecret: null,
-      },
-    });
+    await disable2FA(session.user.id);
 
-    // Log de l'action
-    await logAction({
-      userId: session.user.id,
-      action: AuditAction.TWO_FACTOR_DISABLE,
-      status: 'success',
+    // Révoquer toutes les sessions de confiance
+    await db.session.updateMany({
+      where: {
+        userId: session.user.id,
+        isTrusted: true,
+      },
+      data: {
+        isRevoked: true,
+        revokedAt: new Date(),
+      },
     });
 
     return NextResponse.json({
       success: true,
-      message: '2FA désactivé avec succès',
+      message: 'Authentification à deux facteurs désactivée avec succès',
     });
   } catch (error) {
     console.error('Erreur lors de la désactivation 2FA:', error);
