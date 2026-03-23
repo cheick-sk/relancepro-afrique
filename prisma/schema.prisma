@@ -1,0 +1,506 @@
+// RelancePro Africa - Schema Prisma
+// Plateforme de gestion des créances clients en Afrique
+// Support: SQLite (dev) / PostgreSQL (production)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================
+// TABLE PROFILES - Utilisateurs de l'application
+// =====================================================
+model Profile {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String?  // Hashé avec bcrypt
+  name          String?
+  companyName   String?  // Nom de l'entreprise
+  phone         String?  // Téléphone de contact
+  avatarUrl     String?
+  
+  // Rôle
+  role          String   @default("user") // user, admin
+  
+  // Configuration WhatsApp (chiffré)
+  whatsappApiKey String? // Clé API Whapi.cloud (chiffré)
+  
+  // Configuration Email (Resend) (chiffré)
+  resendApiKey  String?
+  
+  // Devise préférée
+  preferredCurrency String @default("GNF")
+  preferredLanguage String @default("fr")
+  
+  // Abonnement Paystack
+  subscriptionStatus String  @default("free") // free, demo, active, expired
+  subscriptionPlan   String? // starter, business, enterprise
+  subscriptionEnd    DateTime?
+  paystackCustomerId String?
+  paystackSubId      String?
+  
+  // Mode démo
+  demoStartedAt   DateTime?
+  demoExpiresAt   DateTime?
+  
+  // Limitations (pour mode démo)
+  clientsLimit    Int      @default(10)
+  remindersLimit  Int      @default(50)
+  remindersUsed   Int      @default(0)
+  
+  // =====================================================
+  // Two-Factor Authentication (2FA)
+  // =====================================================
+  twoFactorEnabled    Boolean   @default(false)
+  twoFactorSecret     String?   // Secret TOTP chiffré
+  twoFactorBackupCodes String?  // Codes de récupération (JSON chiffré)
+  
+  // =====================================================
+  // Champs de sécurité
+  // =====================================================
+  lastLoginAt        DateTime?
+  lastLoginIp        String?
+  failedLoginAttempts Int      @default(0)
+  lockedUntil        DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  clients    Client[]
+  debts      Debt[]
+  reminders  Reminder[]
+  settings   Settings?
+  payments   Payment[]
+  webhooks   Webhook[]
+  notifications Notification[]
+  auditLogs  AuditLog[]
+  sessions   Session[]
+  reminderQueue ReminderQueue[]
+  reminderLogs  ReminderLog[]
+  
+  @@index([email])
+  @@index([subscriptionStatus])
+  @@index([twoFactorEnabled])
+}
+
+// =====================================================
+// TABLE CLIENTS - Débiteurs (clients à relancer)
+// =====================================================
+model Client {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Informations du client
+  name      String                    // Nom du client/débiteur
+  email     String?                   // Email (optionnel)
+  phone     String?                   // WhatsApp/Téléphone (optionnel)
+  company   String?                   // Nom de l'entreprise (si B2B)
+  address   String?                   // Adresse
+  notes     String?                   // Notes additionnelles
+  
+  // Score de risque (calculé par IA)
+  riskScore Int?    // 0-100
+  riskLevel String? // low, medium, high
+  
+  // Statut
+  status    String  @default("active") // active, inactive, blacklisted
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile   Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  debts     Debt[]
+  reminders Reminder[]
+  reminderQueue ReminderQueue[]
+  
+  @@index([profileId])
+  @@index([email])
+  @@index([phone])
+  @@index([status])
+}
+
+// =====================================================
+// TABLE DEBTS - Créances / Dettes
+// =====================================================
+model Debt {
+  id        String  @id @default(cuid())
+  clientId  String
+  profileId String
+  
+  // Détails de la créance
+  reference   String?   // Numéro de facture/référence
+  description String?   // Description de la créance
+  amount      Float     // Montant dû
+  currency    String    @default("GNF") // GNF, XOF, XAF, EUR, USD, etc.
+  
+  // Dates importantes
+  issueDate   DateTime? // Date d'émission
+  dueDate     DateTime  // Date d'échéance
+  
+  // Statut
+  status      String    @default("pending") // pending, paid, partial, disputed, cancelled
+  paidAmount  Float     @default(0)         // Montant déjà payé
+  paidDate    DateTime? // Date de paiement complet
+  
+  // Relance
+  reminderCount   Int       @default(0)
+  lastReminderAt  DateTime?
+  nextReminderAt  DateTime?
+  
+  // Prédiction IA
+  paymentProbability Float? // 0-100%
+  predictedPayDate   DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile   Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  reminders Reminder[]
+  
+  @@index([clientId])
+  @@index([profileId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// =====================================================
+// TABLE REMINDERS - Historique des relances
+// =====================================================
+model Reminder {
+  id        String  @id @default(cuid())
+  debtId    String
+  clientId  String
+  profileId String
+  
+  // Type de relance
+  type      String  // 'email' ou 'whatsapp'
+  
+  // Contenu
+  subject   String? // Sujet (pour email)
+  message   String  // Corps du message
+  
+  // Ton utilisé (IA)
+  tone      String? // formal, friendly, urgent
+  
+  // Statut de l'envoi
+  status    String  @default("pending") // pending, sent, failed, delivered, opened
+  error     String? // Message d'erreur si échec
+  
+  // Réponse du client
+  responseReceived Boolean @default(false)
+  responseMessage  String?
+  respondedAt      DateTime?
+  
+  sentAt    DateTime?
+  deliveredAt DateTime?
+  openedAt  DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  debt   Debt    @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  client Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([debtId])
+  @@index([clientId])
+  @@index([profileId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE SETTINGS - Configuration utilisateur
+// =====================================================
+model Settings {
+  id        String  @id @default(cuid())
+  profileId String  @unique
+  
+  // Configuration Email
+  emailSignature   String?
+  emailSenderName  String?
+  emailReplyTo     String?
+  
+  // Configuration WhatsApp
+  whatsappBusinessName String?
+  whatsappGreeting     String?
+  
+  // Modèles de messages
+  emailTemplateReminder1  String? // Premier rappel
+  emailTemplateReminder2  String? // Deuxième rappel
+  emailTemplateReminder3  String? // Dernier rappel
+  whatsappTemplateReminder1 String?
+  whatsappTemplateReminder2 String?
+  whatsappTemplateReminder3 String?
+  
+  // Paramètres de relance automatique
+  autoRemindEnabled   Boolean @default(true)
+  reminderDay1        Int     @default(3)  // Jours après échéance pour 1ère relance
+  reminderDay2        Int     @default(7)  // Jours pour 2ème relance
+  reminderDay3        Int     @default(14) // Jours pour 3ème relance
+  
+  // Notifications
+  emailNotificationsEnabled Boolean @default(true)
+  soundNotificationsEnabled Boolean @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+}
+
+// =====================================================
+// TABLE PAYMENTS - Historique des paiements (Paystack)
+// =====================================================
+model Payment {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Détails Paystack
+  paystackRef    String  @unique // Référence Paystack
+  paystackTransId String? // ID transaction Paystack
+  
+  // Montant
+  amount    Float
+  currency  String  @default("GNF")
+  
+  // Statut
+  status    String  @default("pending") // pending, success, failed
+  plan      String? // starter, business, enterprise
+  
+  // Métadonnées
+  metadata  String? // JSON additionnel
+  
+  paidAt    DateTime?
+  createdAt DateTime @default(now())
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE WEBHOOKS - Webhooks configurés par l'utilisateur
+// =====================================================
+model Webhook {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Configuration
+  name      String
+  url       String
+  secret    String?
+  events    String  // JSON array of events
+  active    Boolean @default(true)
+  
+  // Statistiques
+  lastTriggeredAt DateTime?
+  failureCount    Int     @default(0)
+  successCount    Int     @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([active])
+}
+
+// =====================================================
+// TABLE NOTIFICATIONS - Notifications in-app
+// =====================================================
+model Notification {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Contenu
+  type      String  // success, error, warning, info
+  title     String
+  message   String
+  actionUrl String?
+  actionLabel String?
+  
+  // Statut
+  read      Boolean @default(false)
+  readAt    DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE AUDIT LOGS - Journal d'audit de sécurité
+// =====================================================
+model AuditLog {
+  id        String  @id @default(cuid())
+  userId    String?
+  
+  // Action effectuée
+  action    String  // login, logout, client_create, client_update, reminder_send, etc.
+  entityType String? // Profile, Client, Debt, Reminder, etc.
+  entityId   String? // ID de l'entité concernée
+  
+  // Changements
+  oldValue  String? // JSON de l'ancienne valeur
+  newValue  String? // JSON de la nouvelle valeur
+  
+  // Métadonnées de la requête
+  ip        String?
+  userAgent String?
+  
+  // Statut de l'action
+  status    String  @default("success") // success, failed
+  
+  // Détails additionnels
+  details   String? // JSON avec des détails supplémentaires
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  user      Profile? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@index([status])
+}
+
+// =====================================================
+// TABLE SESSIONS - Sessions actives des utilisateurs
+// =====================================================
+model Session {
+  id        String  @id @default(cuid())
+  userId    String
+  token     String  @unique // Session token
+  
+  // Informations de session
+  userAgent String?
+  ip        String?
+  device    String? // Desktop, Mobile, Tablet
+  browser   String? // Chrome, Firefox, Safari, etc.
+  os        String? // Windows, macOS, Linux, iOS, Android
+  
+  // Localisation approximative
+  country   String?
+  city      String?
+  
+  // Gestion de la session
+  lastActive DateTime @default(now())
+  expiresAt  DateTime
+  isRevoked  Boolean  @default(false)
+  revokedAt  DateTime?
+  revokedBy  String?  // User ID who revoked the session
+  
+  // Trusted device (pour 2FA)
+  isTrusted  Boolean  @default(false)
+  trustedUntil DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@index([isRevoked])
+}
+
+// =====================================================
+// TABLE REMINDER QUEUE - File d'attente des relances planifiées
+// =====================================================
+model ReminderQueue {
+  id        String  @id @default(cuid())
+  debtId    String
+  clientId  String
+  profileId String
+  
+  // Planification
+  scheduledAt DateTime  // Date et heure planifiées
+  reminderType String   // 'first', 'second', 'third'
+  channel     String    // 'email', 'whatsapp', 'both'
+  
+  // Statut
+  status      String    @default("pending") // pending, processing, sent, failed, cancelled
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  
+  // Contenu généré (par IA)
+  subject     String?   // Sujet (pour email)
+  message     String?   // Message généré
+  tone        String?   // formal, friendly, urgent
+  
+  // Résultat
+  error       String?   // Message d'erreur si échec
+  sentAt      DateTime? // Date d'envoi réel
+  
+  // Métadonnées
+  priority    Int       @default(0) // 0 = normal, 1 = haute, 2 = urgente
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  debt   Debt    @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  client Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([debtId])
+  @@index([clientId])
+  @@index([profileId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([reminderType])
+}
+
+// =====================================================
+// TABLE REMINDER LOGS - Journal des actions de relance
+// =====================================================
+model ReminderLog {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Action
+  action    String  // scheduled, sent, failed, cancelled, processed
+  entityType String? // Debt, Client, ReminderQueue
+  entityId   String?
+  
+  // Détails
+  details   String? // JSON avec les détails de l'action
+  
+  // Résultat
+  success   Boolean @default(true)
+  error     String?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([action])
+  @@index([createdAt])
+}
