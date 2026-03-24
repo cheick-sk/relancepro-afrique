@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f97316"/>
+      <stop offset="100%" style="stop-color:#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <!-- Chat bubble -->
+  <g fill="white" transform="translate(96, 96)">
+    <!-- Main bubble -->
+    <path d="M256 0C114.6 0 0 93.1 0 208c0 49.6 21.4 95.1 57.3 130.3L0 384l89.6-32.6c32.9 14.6 70.1 22.6 108.4 22.6 141.4 0 256-93.1 256-208S339.4 0 256 0z" transform="scale(0.8) translate(32, 32)"/>
+    <!-- Checkmark -->
+    <path d="M240 272l-64-64-24 24 88 88 152-152-24-24z" transform="translate(40, -20) scale(0.7)" fill="#f97316"/>
+  </g>
+</svg>
