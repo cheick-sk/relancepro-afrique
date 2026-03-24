@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { sendReminder } from "@/lib/services/whatsapp";
 import { checkDemoLimits } from "@/lib/demo";
+import { notifyReminderSent } from "@/lib/push/service";
+import { logReminderAction, AuditAction } from "@/lib/audit/logger";
 
 export async function POST(request: NextRequest) {
   try {
@@ -138,6 +140,67 @@ export async function POST(request: NextRequest) {
         lastReminderAt: new Date(),
       },
     });
+
+    // Send push notification for successful reminders
+    if (result.email?.success || result.whatsapp?.success) {
+      // Notify for each successful channel
+      if (result.email?.success) {
+        notifyReminderSent(
+          session.user.id,
+          debt.id,
+          debt.client.name,
+          'email'
+        ).catch(err => console.error("Failed to send push notification:", err));
+
+        // Log audit action for email
+        await logReminderAction(AuditAction.REMINDER_SENT, emailReminder.id, {
+          profileId: session.user.id,
+          debtId: debt.id,
+          clientId: debt.clientId,
+          type: 'email',
+          status: 'success',
+        });
+      }
+      if (result.whatsapp?.success) {
+        notifyReminderSent(
+          session.user.id,
+          debt.id,
+          debt.client.name,
+          'whatsapp'
+        ).catch(err => console.error("Failed to send push notification:", err));
+
+        // Log audit action for whatsapp
+        await logReminderAction(AuditAction.REMINDER_SENT, whatsappReminder.id, {
+          profileId: session.user.id,
+          debtId: debt.id,
+          clientId: debt.clientId,
+          type: 'whatsapp',
+          status: 'success',
+        });
+      }
+    }
+
+    // Log failed reminders
+    if (result.email && !result.email.success) {
+      await logReminderAction(AuditAction.REMINDER_FAILED, reminders.find(r => r.type === 'email')?.id || 'unknown', {
+        profileId: session.user.id,
+        debtId: debt.id,
+        clientId: debt.clientId,
+        type: 'email',
+        status: 'failed',
+        errorMessage: result.email.error,
+      });
+    }
+    if (result.whatsapp && !result.whatsapp.success) {
+      await logReminderAction(AuditAction.REMINDER_FAILED, reminders.find(r => r.type === 'whatsapp')?.id || 'unknown', {
+        profileId: session.user.id,
+        debtId: debt.id,
+        clientId: debt.clientId,
+        type: 'whatsapp',
+        status: 'failed',
+        errorMessage: result.whatsapp.error,
+      });
+    }
 
     return NextResponse.json({
       success: true,

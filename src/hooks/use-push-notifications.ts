@@ -1,139 +1,184 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import {
-  isPushSupported,
-  getNotificationPermission,
-  requestNotificationPermission,
-  subscribeToPush,
-  unsubscribeFromPush,
-  showLocalNotification,
-  setupNotificationClickListener,
-  getDeviceType,
-  getUserAgent,
-} from "@/lib/push-notifications";
+import { type NotificationPreferences, DEFAULT_NOTIFICATION_PREFERENCES } from "@/lib/push/config";
 
+// Push subscription data
 interface PushSubscriptionData {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
+// Subscription from server
+interface Subscription {
   id: string;
   endpoint: string;
   deviceType: string | null;
-  userAgent: string | null;
-  notifyReminders: boolean;
-  notifyPayments: boolean;
-  notifyAlerts: boolean;
-  notifyWeeklyDigest: boolean;
-  quietHoursEnabled: boolean;
-  quietHoursStart: string | null;
-  quietHoursEnd: string | null;
-  active: boolean;
-  lastUsedAt: string | null;
   createdAt: string;
 }
 
+// Return type for the hook
 interface UsePushNotificationsReturn {
   // State
   isSupported: boolean;
-  permissionState: 'granted' | 'denied' | 'default';
   isSubscribed: boolean;
+  permission: NotificationPermission;
+  permissionStatus: NotificationPermission;
   isLoading: boolean;
   error: string | null;
-  subscriptions: PushSubscriptionData[];
-  vapidPublicKey: string | null;
-
+  subscriptions: Subscription[];
+  
   // Actions
-  requestPermission: () => Promise<'granted' | 'denied' | 'default'>;
-  subscribe: () => Promise<boolean>;
-  unsubscribe: (subscriptionId?: string) => Promise<boolean>;
-  unsubscribeAll: () => Promise<boolean>;
-  updatePreferences: (subscriptionId: string, preferences: Partial<{
-    notifyReminders: boolean;
-    notifyPayments: boolean;
-    notifyAlerts: boolean;
-    notifyWeeklyDigest: boolean;
-    quietHoursEnabled: boolean;
-    quietHoursStart: string;
-    quietHoursEnd: string;
-  }>) => Promise<boolean>;
-  showNotification: (title: string, body: string, data?: Record<string, unknown>) => Promise<boolean>;
-  refreshSubscriptions: () => Promise<void>;
+  requestPermission: () => Promise<boolean>;
+  subscribe: () => Promise<PushSubscriptionData | null>;
+  unsubscribe: () => Promise<void>;
+  
+  // Preferences
+  preferences: NotificationPreferences;
+  updatePreferences: (prefs: Partial<NotificationPreferences>) => Promise<void>;
+  
+  // Test
+  sendTestNotification: () => Promise<boolean>;
 }
 
+// Check if push notifications are supported
+function isPushSupported(): boolean {
+  return typeof window !== "undefined" && 
+    "serviceWorker" in navigator && 
+    "PushManager" in window;
+}
+
+// Convert base64 to Uint8Array for VAPID key
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+// Get device type
+function getDeviceType(): "desktop" | "mobile" | "tablet" {
+  const ua = navigator.userAgent.toLowerCase();
+  if (/tablet|ipad/i.test(ua)) return "tablet";
+  if (/mobile|android|iphone|ipod|blackberry|iemobile|opera mini/i.test(ua)) return "mobile";
+  return "desktop";
+}
+
+/**
+ * usePushNotifications - Hook for managing push notifications
+ * 
+ * Provides:
+ * - isSupported: Browser supports push notifications
+ * - permissionStatus: Current permission state
+ * - isSubscribed: User is subscribed to push
+ * - requestPermission(): Request push permission
+ * - subscribe(): Subscribe to push notifications
+ * - unsubscribe(): Unsubscribe from push notifications
+ */
 export function usePushNotifications(): UsePushNotificationsReturn {
   const [isSupported] = useState(() => isPushSupported());
-  const [permissionState, setPermissionState] = useState<'granted' | 'denied' | 'default'>("default");
+  const [permission, setPermission] = useState<NotificationPermission>("default");
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [subscriptions, setSubscriptions] = useState<PushSubscriptionData[]>([]);
-  const [vapidPublicKey, setVapidPublicKey] = useState<string | null>(null);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [preferences, setPreferences] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
 
-  // Check permission and subscription status on mount
+  // Check status on mount
   useEffect(() => {
     const checkStatus = async () => {
-      const currentPermission = getNotificationPermission();
-      setPermissionState(currentPermission as 'granted' | 'denied' | 'default');
+      if (!isSupported) return;
 
-      if (currentPermission === "granted" && isSupported) {
-        await refreshSubscriptions();
+      // Check permission
+      const currentPermission = Notification.permission;
+      setPermission(currentPermission);
+
+      // Check existing subscriptions
+      if (currentPermission === "granted") {
+        try {
+          const response = await fetch("/api/push/subscribe");
+          if (response.ok) {
+            const data = await response.json();
+            setSubscriptions(data.subscriptions || []);
+            setIsSubscribed((data.subscriptions || []).length > 0);
+            
+            if (data.preferences) {
+              setPreferences(data.preferences);
+            }
+            
+            if (data.vapidPublicKey) {
+              localStorage.setItem("vapidPublicKey", data.vapidPublicKey);
+            }
+          }
+        } catch (err) {
+          console.error("Error checking subscription status:", err);
+        }
       }
     };
 
     checkStatus();
 
     // Listen for notification clicks
-    const cleanup = setupNotificationClickListener((data) => {
-      if (data.url) {
-        window.location.href = data.url as string;
+    const handleNotificationClick = (event: MessageEvent) => {
+      if (event.data && event.data.type === "NOTIFICATION_CLICKED") {
+        const data = event.data.data;
+        if (data?.url) {
+          window.location.href = data.url;
+        }
       }
-    });
+    };
 
-    return cleanup;
+    if (typeof navigator !== "undefined" && navigator.serviceWorker) {
+      navigator.serviceWorker.addEventListener("message", handleNotificationClick);
+    }
+
+    return () => {
+      if (typeof navigator !== "undefined" && navigator.serviceWorker) {
+        navigator.serviceWorker.removeEventListener("message", handleNotificationClick);
+      }
+    };
   }, [isSupported]);
 
-  // Refresh subscriptions from server
-  const refreshSubscriptions = useCallback(async () => {
-    try {
-      const response = await fetch("/api/notifications/subscribe");
-      if (response.ok) {
-        const data = await response.json();
-        setSubscriptions(data.subscriptions || []);
-        setVapidPublicKey(data.vapidPublicKey || null);
-        setIsSubscribed((data.subscriptions || []).length > 0);
-      }
-    } catch (err) {
-      console.error("Error refreshing subscriptions:", err);
-    }
-  }, []);
-
   // Request notification permission
-  const requestPermission = useCallback(async () => {
+  const requestPermission = useCallback(async (): Promise<boolean> => {
+    if (!isSupported) {
+      setError("Push notifications are not supported");
+      return false;
+    }
+
     setIsLoading(true);
     setError(null);
 
     try {
-      const newPermission = await requestNotificationPermission();
-      const permission = newPermission as 'granted' | 'denied' | 'default';
-      setPermissionState(permission);
+      const newPermission = await Notification.requestPermission();
+      setPermission(newPermission);
 
-      if (permission !== "granted") {
-        setError("Permission de notification refusée");
+      if (newPermission !== "granted") {
+        setError("Permission denied");
+        setIsLoading(false);
+        return false;
       }
 
-      return permission;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erreur lors de la demande de permission";
-      setError(errorMessage);
-      return "denied" as const;
-    } finally {
       setIsLoading(false);
+      return true;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to request permission";
+      setError(errorMessage);
+      setIsLoading(false);
+      return false;
     }
-  }, []);
+  }, [isSupported]);
 
   // Subscribe to push notifications
-  const subscribe = useCallback(async () => {
+  const subscribe = useCallback(async (): Promise<PushSubscriptionData | null> => {
     if (!isSupported) {
-      setError("Les notifications push ne sont pas supportées par ce navigateur");
-      return false;
+      setError("Push notifications are not supported");
+      return null;
     }
 
     setIsLoading(true);
@@ -141,186 +186,202 @@ export function usePushNotifications(): UsePushNotificationsReturn {
 
     try {
       // Request permission if needed
-      let currentPermission = permissionState;
+      let currentPermission = permission;
       if (currentPermission !== "granted") {
-        currentPermission = await requestPermission();
-        if (currentPermission !== "granted") {
-          setError("Permission de notification requise");
-          return false;
+        const granted = await requestPermission();
+        if (!granted) {
+          setError("Permission required");
+          setIsLoading(false);
+          return null;
+        }
+        currentPermission = "granted";
+      }
+
+      // Get VAPID public key
+      let vapidPublicKey = localStorage.getItem("vapidPublicKey");
+      if (!vapidPublicKey) {
+        const response = await fetch("/api/push/subscribe");
+        if (response.ok) {
+          const data = await response.json();
+          vapidPublicKey = data.vapidPublicKey;
+          if (vapidPublicKey) {
+            localStorage.setItem("vapidPublicKey", vapidPublicKey);
+          }
         }
       }
 
-      // Get push subscription from browser
-      const subscriptionData = await subscribeToPush(vapidPublicKey || undefined);
-      if (!subscriptionData) {
-        setError("Impossible de créer la subscription push");
-        return false;
+      if (!vapidPublicKey) {
+        setError("Failed to get VAPID key");
+        setIsLoading(false);
+        return null;
       }
 
-      // Register with server
-      const response = await fetch("/api/notifications/subscribe", {
+      // Get service worker registration
+      const registration = await navigator.serviceWorker.ready;
+      
+      // Check for existing subscription
+      let subscription = await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        // Create new subscription
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        });
+      }
+
+      // Extract subscription data
+      const subJson = subscription.toJSON();
+      const subscriptionData: PushSubscriptionData = {
+        endpoint: subJson.endpoint || "",
+        p256dh: subJson.keys?.p256dh || "",
+        auth: subJson.keys?.auth || "",
+      };
+
+      if (!subscriptionData.endpoint || !subscriptionData.p256dh || !subscriptionData.auth) {
+        setError("Invalid subscription data");
+        setIsLoading(false);
+        return null;
+      }
+
+      // Save to server
+      const response = await fetch("/api/push/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          endpoint: subscriptionData.endpoint,
-          p256dh: subscriptionData.p256dh,
-          auth: subscriptionData.auth,
-          userAgent: getUserAgent(),
+          ...subscriptionData,
+          userAgent: navigator.userAgent,
           deviceType: getDeviceType(),
+          notifyPaymentReminders: preferences.paymentReminders,
+          notifyNewDebts: preferences.newDebts,
+          notifyRemindersSent: preferences.remindersSent,
+          notifySubscription: preferences.subscription,
+          soundEnabled: preferences.soundEnabled,
+          quietHoursStart: preferences.quietHoursStart,
+          quietHoursEnd: preferences.quietHoursEnd,
         }),
       });
 
       if (!response.ok) {
-        throw new Error("Erreur lors de l'enregistrement de la subscription");
+        throw new Error("Failed to save subscription to server");
       }
 
-      await refreshSubscriptions();
-      return true;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erreur lors de l'abonnement";
-      setError(errorMessage);
-      return false;
-    } finally {
+      // Refresh subscriptions list
+      const dataResponse = await fetch("/api/push/subscribe");
+      if (dataResponse.ok) {
+        const data = await dataResponse.json();
+        setSubscriptions(data.subscriptions || []);
+      }
+
+      setIsSubscribed(true);
       setIsLoading(false);
+      return subscriptionData;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to subscribe";
+      setError(errorMessage);
+      setIsLoading(false);
+      return null;
     }
-  }, [isSupported, permissionState, requestPermission, vapidPublicKey, refreshSubscriptions]);
+  }, [isSupported, permission, requestPermission, preferences]);
 
   // Unsubscribe from push notifications
-  const unsubscribe = useCallback(async (subscriptionId?: string) => {
+  const unsubscribe = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     setError(null);
 
     try {
       // Unsubscribe from browser
-      await unsubscribeFromPush();
+      if (isSupported) {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          await subscription.unsubscribe();
+        }
+      }
 
       // Remove from server
-      const response = await fetch("/api/notifications/unsubscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          subscriptionId ? { subscriptionId } : {}
-        ),
-      });
+      await fetch("/api/push/unsubscribe", { method: "DELETE" });
 
-      if (!response.ok) {
-        throw new Error("Erreur lors du désabonnement");
-      }
-
-      await refreshSubscriptions();
-      return true;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erreur lors du désabonnement";
-      setError(errorMessage);
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [refreshSubscriptions]);
-
-  // Unsubscribe all devices
-  const unsubscribeAll = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // Unsubscribe from browser
-      await unsubscribeFromPush();
-
-      // Remove all from server
-      const response = await fetch("/api/notifications/unsubscribe", {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        throw new Error("Erreur lors du désabonnement");
-      }
-
-      setSubscriptions([]);
       setIsSubscribed(false);
-      return true;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erreur lors du désabonnement";
-      setError(errorMessage);
-      return false;
-    } finally {
+      setSubscriptions([]);
       setIsLoading(false);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to unsubscribe";
+      setError(errorMessage);
+      setIsLoading(false);
+      throw err;
     }
-  }, []);
+  }, [isSupported]);
 
-  // Update subscription preferences
-  const updatePreferences = useCallback(async (
-    subscriptionId: string,
-    preferences: Partial<{
-      notifyReminders: boolean;
-      notifyPayments: boolean;
-      notifyAlerts: boolean;
-      notifyWeeklyDigest: boolean;
-      quietHoursEnabled: boolean;
-      quietHoursStart: string;
-      quietHoursEnd: string;
-    }>
-  ) => {
-    setIsLoading(true);
-    setError(null);
+  // Update notification preferences
+  const updatePreferences = useCallback(async (prefs: Partial<NotificationPreferences>): Promise<void> => {
+    const newPreferences = { ...preferences, ...prefs };
+    setPreferences(newPreferences);
 
     try {
-      const response = await fetch("/api/notifications/subscribe", {
+      const response = await fetch("/api/push/subscribe", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          subscriptionId,
-          ...preferences,
+          notifyPaymentReminders: newPreferences.paymentReminders,
+          notifyNewDebts: newPreferences.newDebts,
+          notifyRemindersSent: newPreferences.remindersSent,
+          notifySubscription: newPreferences.subscription,
+          soundEnabled: newPreferences.soundEnabled,
+          quietHoursStart: newPreferences.quietHoursStart,
+          quietHoursEnd: newPreferences.quietHoursEnd,
         }),
       });
 
       if (!response.ok) {
-        throw new Error("Erreur lors de la mise à jour des préférences");
+        throw new Error("Failed to update preferences");
       }
-
-      await refreshSubscriptions();
-      return true;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Erreur lors de la mise à jour";
-      setError(errorMessage);
-      return false;
-    } finally {
-      setIsLoading(false);
+      // Revert on error
+      setPreferences(preferences);
+      throw err;
     }
-  }, [refreshSubscriptions]);
+  }, [preferences]);
 
-  // Show local notification
-  const showNotification = useCallback(async (
-    title: string,
-    body: string,
-    data?: Record<string, unknown>
-  ) => {
-    if (permissionState !== "granted") {
-      setError("Permission de notification non accordée");
+  // Send test notification
+  const sendTestNotification = useCallback(async (): Promise<boolean> => {
+    if (!isSubscribed) {
+      setError("Not subscribed to push notifications");
       return false;
     }
 
-    return showLocalNotification({
-      title,
-      body,
-      data,
-    });
-  }, [permissionState]);
+    try {
+      const response = await fetch("/api/push/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "debt.created",
+          title: "Notification de test",
+          body: "Votre configuration de notification fonctionne correctement !",
+        }),
+      });
+
+      const data = await response.json();
+      return data.success;
+    } catch (err) {
+      console.error("Error sending test notification:", err);
+      return false;
+    }
+  }, [isSubscribed]);
 
   return {
     isSupported,
-    permissionState,
     isSubscribed,
+    permission,
+    permissionStatus: permission,
     isLoading,
     error,
     subscriptions,
-    vapidPublicKey,
     requestPermission,
     subscribe,
     unsubscribe,
-    unsubscribeAll,
+    preferences,
     updatePreferences,
-    showNotification,
-    refreshSubscriptions,
+    sendTestNotification,
   };
 }

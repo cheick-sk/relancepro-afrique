@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { checkDemoLimits } from "@/lib/demo";
 import { cacheOrFetch, CacheKeys, CacheTTL, invalidateUserCache } from "@/lib/cache";
+import { logClientAction, AuditAction } from "@/lib/audit/logger";
 
 // GET - Liste des clients avec cache
 export async function GET(request: NextRequest) {
@@ -152,6 +153,19 @@ export async function POST(request: NextRequest) {
 
     // Invalider le cache des clients
     await invalidateUserCache(session.user.id);
+
+    // Log audit action
+    await logClientAction(AuditAction.CLIENT_CREATED, client.id, {
+      profileId: session.user.id,
+      clientName: client.name,
+      clientEmail: client.email,
+      newValues: {
+        name: client.name,
+        email: client.email,
+        phone: client.phone,
+        company: client.company,
+      },
+    });
 
     return NextResponse.json(client, { status: 201 });
   } catch (error) {

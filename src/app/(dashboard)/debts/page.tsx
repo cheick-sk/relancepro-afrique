@@ -27,7 +27,7 @@ import { getDebtColumns } from "@/components/debts/debt-columns";
 import { ClientFormDialog } from "@/components/clients/client-form-dialog";
 import { SendReminderDialog } from "@/components/reminders/send-reminder-dialog";
 import { Debt, Client } from "@/types";
-import { Receipt, Plus, RefreshCw, AlertTriangle, Clock, TrendingUp } from "lucide-react";
+import { Receipt, Plus, RefreshCw, AlertTriangle, Clock, TrendingUp, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency } from "@/components/shared/status-badge";
 
@@ -135,10 +135,36 @@ export default function DebtsPage() {
     setReminderDialogOpen(true);
   };
 
+  const handleCreateInvoice = async (debt: Debt) => {
+    try {
+      const response = await fetch(`/api/debts/${debt.id}/invoice`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        if (data.invoice) {
+          toast.info("Cette créance a déjà une facture associée");
+          window.location.href = `/invoices/${data.invoice.id}`;
+          return;
+        }
+        throw new Error(data.error || "Erreur lors de la création de la facture");
+      }
+
+      const data = await response.json();
+      toast.success("Facture créée avec succès");
+      window.location.href = `/invoices/${data.invoice.id}`;
+    } catch (error) {
+      console.error("Error creating invoice:", error);
+      toast.error(error instanceof Error ? error.message : "Erreur lors de la création de la facture");
+    }
+  };
+
   const columns = getDebtColumns({
     onEdit: handleEdit,
     onDelete: handleDelete,
     onSendReminder: handleSendReminder,
+    onCreateInvoice: handleCreateInvoice,
   });
 
   return (

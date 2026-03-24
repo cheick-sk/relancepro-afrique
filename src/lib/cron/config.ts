@@ -1,290 +1,210 @@
 // =====================================================
-// RELANCEPRO AFRICA - Cron Job Configuration
-// Central configuration for all scheduled jobs
+// RELANCEPRO AFRICA - Cron Configuration
+// Configuration for scheduled tasks and background jobs
 // =====================================================
 
-import type { 
-  CronConfig, 
-  AutoReminderConfig, 
-  DemoCleanupConfig,
-  PaymentPredictionConfig,
-  WeeklyReportConfig 
-} from "./types";
+import type { AutoReminderConfig, DemoCleanupConfig, PaymentPredictionConfig } from "./types";
 
-/**
- * Default configuration for automatic reminders
- */
-export const DEFAULT_REMINDER_CONFIG: AutoReminderConfig = {
-  enabled: true,
-  day1: 3,           // First reminder: 3 days after due date
-  day2: 7,           // Second reminder: 7 days after due date
-  day3: 14,          // Third reminder: 14 days after due date
-  skipWeekends: false,
-  startTime: "09:00", // Start sending at 9 AM
-  endTime: "18:00",   // Stop sending at 6 PM
-  maxReminders: 3,
-  maxPerRun: 100,     // Maximum reminders to process per cron run
+// =====================================================
+// CLEANUP CONFIGURATION
+// =====================================================
+
+export const CLEANUP_CONFIG = {
+  maxAge: 30, // days
+  batchSize: 100,
 };
 
-/**
- * Configuration for demo account cleanup
- */
-export const DEMO_CLEANUP_CONFIG: DemoCleanupConfig = {
-  gracePeriodDays: 7, // Wait 7 days after expiration before cleanup
-  archiveBeforeDelete: true, // Archive data before deleting
-  maxPerRun: 50,      // Maximum accounts to process per run
-};
+// =====================================================
+// TIMEZONE CONFIGURATION
+// =====================================================
 
-/**
- * Configuration for payment prediction updates
- */
-export const PAYMENT_PREDICTION_CONFIG: PaymentPredictionConfig = {
-  minDaysOverdue: 1,  // Predict for debts at least 1 day overdue
-  confidenceThreshold: 60, // Minimum confidence to store prediction
-  maxPerRun: 200,     // Maximum debts to analyze per run
-};
+export const SUPPORTED_TIMEZONES = [
+  "Africa/Conakry",
+  "Africa/Dakar",
+  "Africa/Lagos",
+  "Africa/Nairobi",
+  "Africa/Johannesburg",
+  "Africa/Cairo",
+  "Africa/Casablanca",
+  "Africa/Tunis",
+  "Africa/Algiers",
+  "Africa/Abidjan",
+  "Africa/Accra",
+  "Europe/Paris",
+  "Europe/London",
+  "UTC",
+];
 
-/**
- * Configuration for weekly reports
- */
-export const WEEKLY_REPORT_CONFIG: WeeklyReportConfig = {
-  dayOfWeek: 1,       // Monday
-  hour: 8,            // 8 AM
-  timezone: "Africa/Conakry", // Guinea timezone (GMT+0)
-  includeInactive: false,
-};
-
-/**
- * Default timezone for all cron jobs
- * Africa/Conakry is GMT+0 (same as UTC)
- */
 export const DEFAULT_TIMEZONE = "Africa/Conakry";
 
-/**
- * Combined cron configuration
- */
-export const CRON_CONFIG: CronConfig = {
-  reminders: DEFAULT_REMINDER_CONFIG,
-  demoCleanup: DEMO_CLEANUP_CONFIG,
-  paymentPrediction: PAYMENT_PREDICTION_CONFIG,
-  weeklyReport: WEEKLY_REPORT_CONFIG,
+export const DEFAULT_QUIET_HOURS = {
+  start: 22, // 10 PM
+  end: 7, // 7 AM
 };
 
-/**
- * Cron job schedules (cron expressions)
- * These define when each job type runs
- */
-export const CRON_SCHEDULES = {
-  /**
-   * Automatic reminders - Every hour
-   * Checks for due reminders and sends them
-   */
-  reminders: "0 * * * *", // Every hour at minute 0
+// =====================================================
+// AUTO REMINDER CONFIGURATION
+// =====================================================
 
-  /**
-   * Demo cleanup - Daily at 2 AM
-   * Cleans up expired demo accounts
-   */
-  demoCleanup: "0 2 * * *", // Daily at 2:00 AM
+export const DEFAULT_REMINDER_CONFIG: AutoReminderConfig = {
+  enabled: true,
+  day1: 3,        // First reminder 3 days after due date
+  day2: 7,        // Second reminder 7 days after due date
+  day3: 14,       // Third reminder 14 days after due date
+  skipWeekends: true,
+  startTime: "09:00",
+  endTime: "18:00",
+  maxReminders: 3,
+  maxPerRun: 50,
+};
 
-  /**
-   * Payment predictions - Daily at 3 AM
-   * Updates payment probability predictions
-   */
-  paymentPrediction: "0 3 * * *", // Daily at 3:00 AM
+// =====================================================
+// DEMO CLEANUP CONFIGURATION
+// =====================================================
 
-  /**
-   * Weekly reports - Mondays at 8 AM
-   * Sends weekly summary emails
-   */
-  weeklyReport: "0 8 * * 1", // Every Monday at 8:00 AM
+export const DEMO_CLEANUP_CONFIG: DemoCleanupConfig = {
+  gracePeriodDays: 7,      // Keep demo data 7 days after expiration
+  archiveBeforeDelete: true,
+  maxPerRun: 100,
+};
 
-  /**
-   * Health check - Every 5 minutes
-   * Monitors system health
-   */
-  healthCheck: "*/5 * * * *", // Every 5 minutes
-} as const;
+// =====================================================
+// PAYMENT PREDICTION CONFIGURATION
+// =====================================================
 
-/**
- * Retry configuration for failed jobs
- */
+export const PAYMENT_PREDICTION_CONFIG: PaymentPredictionConfig = {
+  minDaysOverdue: 1,
+  confidenceThreshold: 30,  // Minimum confidence to store prediction
+  maxPerRun: 100,
+};
+
+// =====================================================
+// RETRY CONFIGURATION
+// =====================================================
+
 export const RETRY_CONFIG = {
   maxRetries: 3,
-  baseDelayMs: 1000,    // Base delay: 1 second
-  maxDelayMs: 60000,    // Maximum delay: 1 minute
-  backoffMultiplier: 2, // Exponential backoff
+  baseDelayMs: 1000,        // Start with 1 second
+  backoffMultiplier: 2,     // Double each retry
+  maxDelayMs: 30000,        // Max 30 seconds between retries
 };
 
-/**
- * Job timeout configuration (in milliseconds)
- */
-export const JOB_TIMEOUTS = {
-  reminders: 300000,        // 5 minutes
-  demoCleanup: 600000,      // 10 minutes
-  paymentPrediction: 300000, // 5 minutes
-  weeklyReport: 600000,     // 10 minutes
-} as const;
+// =====================================================
+// CRON SECURITY
+// =====================================================
 
 /**
- * Reminder interval options for UI
- * These are the standard intervals users can select
+ * Verify cron secret for API routes
  */
-export const REMINDER_INTERVALS = [
-  { value: 1, label: "1 jour après échéance" },
-  { value: 2, label: "2 jours après échéance" },
-  { value: 3, label: "3 jours après échéance" },
-  { value: 5, label: "5 jours après échéance" },
-  { value: 7, label: "7 jours après échéance" },
-  { value: 10, label: "10 jours après échéance" },
-  { value: 14, label: "14 jours après échéance" },
-  { value: 21, label: "21 jours après échéance" },
-  { value: 30, label: "30 jours après échéance" },
-] as const;
-
-/**
- * Time slot options for UI
- */
-export const TIME_SLOTS = [
-  { value: "06:00", label: "06:00" },
-  { value: "07:00", label: "07:00" },
-  { value: "08:00", label: "08:00" },
-  { value: "09:00", label: "09:00" },
-  { value: "10:00", label: "10:00" },
-  { value: "11:00", label: "11:00" },
-  { value: "12:00", label: "12:00" },
-  { value: "13:00", label: "13:00" },
-  { value: "14:00", label: "14:00" },
-  { value: "15:00", label: "15:00" },
-  { value: "16:00", label: "16:00" },
-  { value: "17:00", label: "17:00" },
-  { value: "18:00", label: "18:00" },
-  { value: "19:00", label: "19:00" },
-  { value: "20:00", label: "20:00" },
-] as const;
-
-/**
- * Maximum reminders options for UI
- */
-export const MAX_REMINDERS_OPTIONS = [
-  { value: 1, label: "1 relance" },
-  { value: 2, label: "2 relances" },
-  { value: 3, label: "3 relances" },
-  { value: 5, label: "5 relances" },
-  { value: 10, label: "10 relances" },
-] as const;
-
-/**
- * Get reminder interval based on reminder number
- * @param reminderNumber - The reminder sequence number (1, 2, or 3)
- * @param customConfig - Optional custom configuration
- * @returns Number of days after due date
- */
-export function getReminderInterval(
-  reminderNumber: 1 | 2 | 3,
-  customConfig?: Partial<AutoReminderConfig>
-): number {
-  const config = { ...DEFAULT_REMINDER_CONFIG, ...customConfig };
+export function verifyCronSecret(authHeader: string | null): boolean {
+  if (!authHeader) return false;
   
-  switch (reminderNumber) {
-    case 1:
-      return config.day1;
-    case 2:
-      return config.day2;
-    case 3:
-      return config.day3;
-    default:
-      return config.day1;
-  }
-}
-
-/**
- * Calculate the next reminder date based on due date and settings
- * @param dueDate - The debt's due date
- * @param reminderNumber - Which reminder (1, 2, or 3)
- * @param config - Reminder configuration
- * @returns The calculated reminder date
- */
-export function calculateReminderDate(
-  dueDate: Date,
-  reminderNumber: 1 | 2 | 3,
-  config: AutoReminderConfig = DEFAULT_REMINDER_CONFIG
-): Date {
-  const daysAfterDue = getReminderInterval(reminderNumber, config);
-  const reminderDate = new Date(dueDate);
-  reminderDate.setDate(reminderDate.getDate() + daysAfterDue);
-  
-  // Set the time to the configured start time
-  const [hours, minutes] = config.startTime.split(":").map(Number);
-  reminderDate.setHours(hours, minutes, 0, 0);
-  
-  // Skip weekends if configured
-  if (config.skipWeekends) {
-    const dayOfWeek = reminderDate.getDay();
-    if (dayOfWeek === 0) {
-      // Sunday -> Monday
-      reminderDate.setDate(reminderDate.getDate() + 1);
-    } else if (dayOfWeek === 6) {
-      // Saturday -> Monday
-      reminderDate.setDate(reminderDate.getDate() + 2);
-    }
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    console.warn("[Cron] CRON_SECRET not configured");
+    return true; // Allow in development
   }
   
-  return reminderDate;
+  return authHeader === `Bearer ${cronSecret}`;
 }
 
 /**
  * Check if cron jobs are enabled
  */
 export function isCronEnabled(): boolean {
-  return process.env.CRON_REMINDERS_ENABLED !== "false";
+  return process.env.CRON_ENABLED !== "false";
 }
 
-/**
- * Get the cron secret for authentication
- */
-export function getCronSecret(): string | undefined {
-  return process.env.CRON_SECRET;
-}
+// =====================================================
+// HELPER FUNCTIONS
+// =====================================================
 
 /**
- * Verify a cron request secret
- * @param providedSecret - The secret provided in the request
- * @returns Whether the secret is valid
+ * Calculate the next reminder date based on due date and reminder number
  */
-export function verifyCronSecret(providedSecret: string | null): boolean {
-  // In development, allow requests without secret
-  if (process.env.NODE_ENV === "development") {
-    return true;
+export function calculateReminderDate(
+  dueDate: Date,
+  reminderNumber: 1 | 2 | 3,
+  config: AutoReminderConfig = DEFAULT_REMINDER_CONFIG
+): Date | null {
+  const result = new Date(dueDate);
+  
+  let daysToAdd: number;
+  switch (reminderNumber) {
+    case 1:
+      daysToAdd = config.day1;
+      break;
+    case 2:
+      daysToAdd = config.day2;
+      break;
+    case 3:
+      daysToAdd = config.day3;
+      break;
+    default:
+      return null;
   }
   
-  const secret = getCronSecret();
-  if (!secret) {
-    console.error("[Cron] CRON_SECRET not configured");
+  result.setDate(result.getDate() + daysToAdd);
+  
+  // Skip weekends if configured
+  if (config.skipWeekends) {
+    while (result.getDay() === 0 || result.getDay() === 6) {
+      result.setDate(result.getDate() + 1);
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Check if current time is within quiet hours
+ */
+export function isQuietHours(timezone: string = DEFAULT_TIMEZONE): boolean {
+  try {
+    const now = new Date();
+    const hour = now.getHours();
+    return hour >= DEFAULT_QUIET_HOURS.start || hour < DEFAULT_QUIET_HOURS.end;
+  } catch {
     return false;
   }
-  
-  return providedSecret === secret;
 }
 
 /**
- * Get job priority value for sorting
- * Higher number = higher priority
+ * Get next valid send time (outside quiet hours)
  */
-export function getPriorityValue(priority: string): number {
-  const priorityMap: Record<string, number> = {
-    low: 0,
-    normal: 1,
-    high: 2,
-    urgent: 3,
-  };
-  return priorityMap[priority] ?? 1;
+export function getNextValidSendTime(fromDate: Date = new Date()): Date {
+  const result = new Date(fromDate);
+  const hour = result.getHours();
+  
+  // If we're in quiet hours, move to the next valid time
+  if (hour >= DEFAULT_QUIET_HOURS.start) {
+    result.setDate(result.getDate() + 1);
+    result.setHours(DEFAULT_QUIET_HOURS.end, 0, 0, 0);
+  } else if (hour < DEFAULT_QUIET_HOURS.end) {
+    result.setHours(DEFAULT_QUIET_HOURS.end, 0, 0, 0);
+  }
+  
+  // Skip weekends if needed
+  while (result.getDay() === 0 || result.getDay() === 6) {
+    result.setDate(result.getDate() + 1);
+  }
+  
+  return result;
 }
 
-export type { 
-  CronConfig, 
-  AutoReminderConfig, 
-  DemoCleanupConfig,
-  PaymentPredictionConfig,
-  WeeklyReportConfig 
-};
+/**
+ * Format cron schedule for display
+ */
+export function formatCronSchedule(cronExpression: string): string {
+  const schedules: Record<string, string> = {
+    "0 * * * *": "Every hour",
+    "0 0 * * *": "Daily at midnight",
+    "0 9 * * *": "Daily at 9 AM",
+    "0 9 * * 1": "Every Monday at 9 AM",
+    "0 9 * * 1-5": "Weekdays at 9 AM",
+    "0 */6 * * *": "Every 6 hours",
+    "0 0 * * 0": "Every Sunday at midnight",
+  };
+  
+  return schedules[cronExpression] || cronExpression;
+}

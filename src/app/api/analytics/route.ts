@@ -2,23 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import { format, subDays, subMonths, startOfMonth, endOfMonth, differenceInDays } from "date-fns";
-
-// Cache configuration
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-const cache = new Map<string, { data: unknown; timestamp: number }>();
-
-function getCachedData(key: string) {
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-  return null;
-}
-
-function setCachedData(key: string, data: unknown) {
-  cache.set(key, { data, timestamp: Date.now() });
-}
+import { subDays, subMonths, startOfDay, endOfDay, differenceInDays, format } from "date-fns";
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,42 +13,39 @@ export async function GET(request: NextRequest) {
 
     const profileId = session.user.id;
     const searchParams = request.nextUrl.searchParams;
-    const startDateParam = searchParams.get("startDate");
-    const endDateParam = searchParams.get("endDate");
-    const currency = searchParams.get("currency") || "GNF";
-
-    // Parse date range
-    const endDate = endDateParam ? new Date(endDateParam) : new Date();
-    const startDate = startDateParam ? new Date(startDateParam) : subDays(endDate, 30);
-
-    // Calculate previous period for comparison
-    const periodDays = differenceInDays(endDate, startDate);
-    const previousPeriodStart = subDays(startDate, periodDays);
-    const previousPeriodEnd = subDays(startDate, 1);
-
-    // Check cache
-    const cacheKey = `${profileId}-${startDate.toISOString()}-${endDate.toISOString()}-${currency}`;
-    const cachedData = getCachedData(cacheKey);
-    if (cachedData) {
-      return NextResponse.json(cachedData);
+    
+    // Date range parameters
+    const fromDateStr = searchParams.get("from");
+    const toDateStr = searchParams.get("to");
+    
+    let fromDate: Date;
+    let toDate: Date;
+    
+    if (fromDateStr && toDateStr) {
+      fromDate = new Date(fromDateStr);
+      toDate = new Date(toDateStr);
+    } else {
+      // Default: last 30 days
+      fromDate = subDays(new Date(), 30);
+      toDate = new Date();
     }
+    
+    // Calculate previous period for trends
+    const periodDuration = differenceInDays(toDate, fromDate);
+    const previousFromDate = subDays(fromDate, periodDuration);
+    const previousToDate = subDays(fromDate, 1);
 
-    // Fetch all debts with relations
+    // Fetch all debts with their relations
     const debts = await db.debt.findMany({
-      where: {
-        profileId,
-        createdAt: { lte: endDate },
-      },
+      where: { profileId },
       include: {
         client: {
           select: {
             id: true,
             name: true,
             email: true,
-            phone: true,
             company: true,
-            riskLevel: true,
-            status: true,
+            phone: true,
           },
         },
         reminders: {
@@ -75,9 +56,7 @@ export async function GET(request: NextRequest) {
             sentAt: true,
             createdAt: true,
             responseReceived: true,
-            respondedAt: true,
           },
-          orderBy: { createdAt: "desc" },
         },
       },
       orderBy: { createdAt: "desc" },
@@ -85,25 +64,14 @@ export async function GET(request: NextRequest) {
 
     // Fetch reminders
     const reminders = await db.reminder.findMany({
-      where: {
-        profileId,
-        createdAt: { gte: previousPeriodStart, lte: endDate },
-      },
+      where: { profileId },
       select: {
         id: true,
         type: true,
         status: true,
         createdAt: true,
         sentAt: true,
-        deliveredAt: true,
-        openedAt: true,
         responseReceived: true,
-        respondedAt: true,
-        debt: {
-          select: {
-            reminderCount: true,
-          },
-        },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -115,180 +83,131 @@ export async function GET(request: NextRequest) {
         id: true,
         name: true,
         email: true,
-        phone: true,
         company: true,
+        riskScore: true,
         riskLevel: true,
-        status: true,
-        debts: {
-          select: {
-            amount: true,
-            paidAmount: true,
-            status: true,
-            dueDate: true,
-          },
-        },
       },
     });
 
     const now = new Date();
 
-    // ========================================
-    // KPIs CALCULATION
-    // ========================================
+    // =====================================================
+    // SUMMARY STATS WITH TRENDS
+    // =====================================================
+    
+    // Current period amounts
+    const currentDebts = debts.filter(d => 
+      new Date(d.createdAt) >= fromDate && new Date(d.createdAt) <= toDate
+    );
+    
+    const previousDebts = debts.filter(d => 
+      new Date(d.createdAt) >= previousFromDate && new Date(d.createdAt) <= previousToDate
+    );
+
     const totalAmount = debts.reduce((sum, d) => sum + d.amount, 0);
     const paidAmount = debts.reduce((sum, d) => sum + d.paidAmount, 0);
-    const pendingDebts = debts.filter((d) => d.status !== "paid" && d.status !== "cancelled");
-    const pendingAmount = pendingDebts.reduce((sum, d) => sum + (d.amount - d.paidAmount), 0);
+    const pendingAmount = debts
+      .filter((d) => d.status !== "paid" && d.status !== "cancelled")
+      .reduce((sum, d) => sum + (d.amount - d.paidAmount), 0);
 
-    // Overdue debts
-    const overdueDebts = debts.filter((d) => {
-      if (d.status === "paid" || d.status === "cancelled") return false;
-      return new Date(d.dueDate) < now;
-    });
-    const overdueAmount = overdueDebts.reduce((sum, d) => sum + (d.amount - d.paidAmount), 0);
-
-    // Active clients (clients with pending debts)
-    const activeClients = clients.filter((c) =>
-      c.debts.some((d) => d.status !== "paid" && d.status !== "cancelled")
-    );
-
-    // Average days to payment
-    const paidDebts = debts.filter((d) => d.status === "paid" && d.paidDate);
-    const avgDaysToPayment = paidDebts.length > 0
-      ? Math.round(
-          paidDebts.reduce((sum, d) => {
-            const days = differenceInDays(new Date(d.paidDate!), new Date(d.createdAt));
-            return sum + Math.max(0, days);
-          }, 0) / paidDebts.length
-        )
-      : 0;
-
-    // Recovery rate
-    const recoveryRate = totalAmount > 0 ? Math.round((paidAmount / totalAmount) * 100) : 0;
-
-    // Average payment probability
-    const debtsWithProbability = debts.filter((d) => d.paymentProbability !== null);
-    const avgPaymentProbability = debtsWithProbability.length > 0
-      ? Math.round(
-          debtsWithProbability.reduce((sum, d) => sum + (d.paymentProbability || 0), 0) /
-            debtsWithProbability.length
-        )
-      : 0;
-
-    // Previous period KPIs for comparison
-    const previousPeriodDebts = debts.filter(
-      (d) => d.createdAt >= previousPeriodStart && d.createdAt <= previousPeriodEnd
-    );
-    const previousTotalAmount = previousPeriodDebts.reduce((sum, d) => sum + d.amount, 0);
-    const previousPaidAmount = previousPeriodDebts
-      .filter((d) => d.status === "paid" && d.paidDate)
+    // Previous period amounts
+    const previousTotalAmount = previousDebts.reduce((sum, d) => sum + d.amount, 0);
+    const previousPaidAmount = previousDebts
+      .filter(d => d.paidDate && new Date(d.paidDate) >= previousFromDate && new Date(d.paidDate) <= previousToDate)
       .reduce((sum, d) => sum + d.paidAmount, 0);
-    const previousRecoveryRate = previousTotalAmount > 0
-      ? Math.round((previousPaidAmount / previousTotalAmount) * 100)
-      : 0;
+    const previousPendingAmount = previousDebts
+      .filter((d) => d.status !== "paid" && d.status !== "cancelled")
+      .reduce((sum, d) => sum + (d.amount - d.paidAmount), 0);
 
-    const kpis = {
-      totalDebts: debts.length,
-      totalAmount,
-      paidAmount,
-      pendingAmount,
-      overdueAmount,
-      clientCount: clients.length,
-      activeClientsCount: activeClients.length,
-      overdueDebtsCount: overdueDebts.length,
-      reminderCount: reminders.length,
-      recoveryRate,
-      avgPaymentProbability,
-      avgDaysToPayment,
+    // Sparkline data (last 7 days)
+    const sparklineData: {
+      amounts: number[];
+      recovered: number[];
+      pending: number[];
+      reminders: number[];
+    } = {
+      amounts: [],
+      recovered: [],
+      pending: [],
+      reminders: [],
     };
 
-    const previousKpis = {
-      totalAmount: previousTotalAmount,
-      paidAmount: previousPaidAmount,
-      recoveryRate: previousRecoveryRate,
+    for (let i = 6; i >= 0; i--) {
+      const dayStart = startOfDay(subDays(now, i));
+      const dayEnd = endOfDay(subDays(now, i));
+      
+      const dayDebts = debts.filter(d => {
+        const date = new Date(d.createdAt);
+        return date >= dayStart && date <= dayEnd;
+      });
+      
+      sparklineData.amounts.push(dayDebts.reduce((sum, d) => sum + d.amount, 0));
+      sparklineData.recovered.push(
+        dayDebts.filter(d => d.paidDate && new Date(d.paidDate) >= dayStart && new Date(d.paidDate) <= dayEnd)
+          .reduce((sum, d) => sum + d.paidAmount, 0)
+      );
+      sparklineData.pending.push(
+        dayDebts.filter(d => d.status !== "paid").reduce((sum, d) => sum + (d.amount - d.paidAmount), 0)
+      );
+      sparklineData.reminders.push(
+        reminders.filter(r => {
+          const date = new Date(r.sentAt || r.createdAt);
+          return date >= dayStart && date <= dayEnd;
+        }).length
+      );
+    }
+
+    // =====================================================
+    // RECOVERY CHART DATA
+    // =====================================================
+    
+    const getMonthYear = (date: Date) => {
+      const d = new Date(date);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     };
 
-    // ========================================
-    // COLLECTION DATA OVER TIME
-    // ========================================
-    const collectionByDate: Record<string, { collected: number; date: string }> = {};
-    const previousCollectionByDate: Record<string, { collected: number; date: string }> = {};
-
-    // Generate all dates in range
-    const currentDate = new Date(startDate);
-    while (currentDate <= endDate) {
-      const dateKey = format(currentDate, "yyyy-MM-dd");
-      collectionByDate[dateKey] = { collected: 0, date: format(currentDate, "d MMM") };
-      currentDate.setDate(currentDate.getDate() + 1);
+    const recoveryByMonth: Record<string, { month: string; recovered: number; total: number; rate: number }> = {};
+    
+    // Initialize last 12 months
+    for (let i = 11; i >= 0; i--) {
+      const date = subMonths(now, i);
+      const key = getMonthYear(date);
+      recoveryByMonth[key] = {
+        month: format(date, "MMM yy", { locale: undefined }),
+        recovered: 0,
+        total: 0,
+        rate: 0,
+      };
     }
 
-    // Generate previous period dates
-    const currentPrevDate = new Date(previousPeriodStart);
-    while (currentPrevDate <= previousPeriodEnd) {
-      const dateKey = format(currentPrevDate, "yyyy-MM-dd");
-      previousCollectionByDate[dateKey] = { collected: 0, date: format(currentPrevDate, "d MMM") };
-      currentPrevDate.setDate(currentPrevDate.getDate() + 1);
-    }
-
-    // Fill in collected amounts
     debts.forEach((debt) => {
-      if (debt.status === "paid" && debt.paidDate) {
-        const dateKey = format(new Date(debt.paidDate), "yyyy-MM-dd");
-        if (collectionByDate[dateKey]) {
-          collectionByDate[dateKey].collected += debt.paidAmount;
-        }
-        if (previousCollectionByDate[dateKey]) {
-          previousCollectionByDate[dateKey].collected += debt.paidAmount;
+      // Total by creation month
+      const createdMonth = getMonthYear(debt.createdAt);
+      if (recoveryByMonth[createdMonth]) {
+        recoveryByMonth[createdMonth].total += debt.amount;
+      }
+      
+      // Recovered by paid date
+      if (debt.paidDate) {
+        const paidMonth = getMonthYear(debt.paidDate);
+        if (recoveryByMonth[paidMonth]) {
+          recoveryByMonth[paidMonth].recovered += debt.paidAmount;
         }
       }
     });
 
-    // Group by week or month based on period length
-    const groupByPeriod = (data: Record<string, { collected: number; date: string }>) => {
-      const periodDays = differenceInDays(endDate, startDate);
-      const entries = Object.entries(data);
+    // Calculate rates
+    Object.keys(recoveryByMonth).forEach((key) => {
+      const data = recoveryByMonth[key];
+      data.rate = data.total > 0 ? Math.round((data.recovered / data.total) * 100) : 0;
+    });
 
-      if (periodDays <= 31) {
-        // Group by day
-        return entries.map(([key, value]) => ({
-          date: value.date,
-          collected: value.collected,
-          dateKey: key,
-        }));
-      } else if (periodDays <= 90) {
-        // Group by week
-        const weekly: Record<string, { collected: number; date: string }> = {};
-        entries.forEach(([key, value]) => {
-          const date = new Date(key);
-          const weekStart = format(subDays(date, date.getDay()), "d MMM");
-          const weekKey = `Week of ${weekStart}`;
-          if (!weekly[weekKey]) {
-            weekly[weekKey] = { collected: 0, date: weekKey };
-          }
-          weekly[weekKey].collected += value.collected;
-        });
-        return Object.values(weekly);
-      } else {
-        // Group by month
-        const monthly: Record<string, { collected: number; date: string }> = {};
-        entries.forEach(([key, value]) => {
-          const date = new Date(key);
-          const monthKey = format(date, "MMM yyyy");
-          if (!monthly[monthKey]) {
-            monthly[monthKey] = { collected: 0, date: monthKey };
-          }
-          monthly[monthKey].collected += value.collected;
-        });
-        return Object.values(monthly);
-      }
-    };
+    const recoveryChartData = Object.values(recoveryByMonth);
 
-    const collectionData = groupByPeriod(collectionByDate);
-    const previousCollectionData = groupByPeriod(previousCollectionByDate);
-
-    // ========================================
+    // =====================================================
     // DEBT STATUS DISTRIBUTION
-    // ========================================
+    // =====================================================
+    
     const statusDistribution = {
       pending: { count: 0, amount: 0 },
       paid: { count: 0, amount: 0 },
@@ -301,342 +220,376 @@ export async function GET(request: NextRequest) {
       const status = debt.status as keyof typeof statusDistribution;
       if (statusDistribution[status]) {
         statusDistribution[status].count++;
-        statusDistribution[status].amount += debt.amount;
+        statusDistribution[status].amount += debt.amount - debt.paidAmount;
       }
     });
 
-    const totalDebtsCount = debts.length;
-    const statusColors: Record<string, string> = {
-      pending: "#f59e0b",
-      paid: "#22c55e",
-      partial: "#3b82f6",
-      disputed: "#f97316",
-      cancelled: "#6b7280",
-    };
+    const debtStatusData = [
+      { name: "En attente", value: statusDistribution.pending.count, amount: statusDistribution.pending.amount, color: "#f59e0b" },
+      { name: "Payées", value: statusDistribution.paid.count, amount: statusDistribution.paid.amount, color: "#22c55e" },
+      { name: "Partielles", value: statusDistribution.partial.count, amount: statusDistribution.partial.amount, color: "#3b82f6" },
+      { name: "Contestées", value: statusDistribution.disputed.count, amount: statusDistribution.disputed.amount, color: "#f97316" },
+      { name: "Annulées", value: statusDistribution.cancelled.count, amount: statusDistribution.cancelled.amount, color: "#6b7280" },
+    ];
 
-    const statusLabels: Record<string, string> = {
-      pending: "En attente",
-      paid: "Payées",
-      partial: "Partielles",
-      disputed: "Contestées",
-      cancelled: "Annulées",
-    };
-
-    const debtStatusData = Object.entries(statusDistribution)
-      .filter(([, data]) => data.count > 0)
-      .map(([status, data]) => ({
-        name: statusLabels[status],
-        value: data.count,
-        amount: data.amount,
-        color: statusColors[status],
-        percentage: totalDebtsCount > 0 ? Math.round((data.count / totalDebtsCount) * 100) : 0,
-        status,
-      }));
-
-    // ========================================
-    // CLIENT RISK DISTRIBUTION
-    // ========================================
-    const riskGroups: Record<string, { count: number; amount: number; clients: string[] }> = {
-      low: { count: 0, amount: 0, clients: [] },
-      medium: { count: 0, amount: 0, clients: [] },
-      high: { count: 0, amount: 0, clients: [] },
-      undefined: { count: 0, amount: 0, clients: [] },
-    };
-
-    clients.forEach((client) => {
-      const totalDebt = client.debts
-        .filter((d) => d.status !== "paid" && d.status !== "cancelled")
-        .reduce((sum, d) => sum + (d.amount - d.paidAmount), 0);
-
-      const level = client.riskLevel || "undefined";
-      if (riskGroups[level]) {
-        riskGroups[level].count++;
-        riskGroups[level].amount += totalDebt;
-        if (client.id) riskGroups[level].clients.push(client.id);
-      }
-    });
-
-    const totalClients = clients.length;
-    const riskLabels: Record<string, string> = {
-      low: "Faible",
-      medium: "Moyen",
-      high: "Élevé",
-      undefined: "Non évalué",
-    };
-
-    const clientRiskData = Object.entries(riskGroups)
-      .filter(([, data]) => data.count > 0)
-      .map(([level, data]) => ({
-        level: riskLabels[level],
-        count: data.count,
-        amount: data.amount,
-        percentage: totalClients > 0 ? Math.round((data.count / totalClients) * 100) : 0,
-      }));
-
-    // ========================================
-    // REMINDER EFFECTIVENESS BY CHANNEL
-    // ========================================
-    const channelStats: Record<string, { sent: number; delivered: number; opened: number; responded: number }> = {
-      email: { sent: 0, delivered: 0, opened: 0, responded: 0 },
-      whatsapp: { sent: 0, delivered: 0, opened: 0, responded: 0 },
-    };
-
-    reminders.forEach((reminder) => {
-      if (reminder.type === "email" || reminder.type === "whatsapp") {
-        channelStats[reminder.type].sent++;
-        if (reminder.deliveredAt || reminder.openedAt) {
-          channelStats[reminder.type].delivered++;
-        }
-        if (reminder.openedAt) {
-          channelStats[reminder.type].opened++;
-        }
-        if (reminder.responseReceived) {
-          channelStats[reminder.type].responded++;
-        }
-      }
-    });
-
-    const reminderChannelData = Object.entries(channelStats).map(([type, data]) => ({
-      type: type === "email" ? "Email" : "WhatsApp",
-      sent: data.sent,
-      delivered: data.delivered,
-      opened: data.opened,
-      responded: data.responded,
-      successRate: data.sent > 0 ? Math.round((data.delivered / data.sent) * 100) : 0,
-    }));
-
-    // ========================================
-    // REMINDER EFFECTIVENESS BY NUMBER
-    // ========================================
-    const reminderNumberStats: Record<string, { sent: number; success: number; totalResponseTime: number; responseCount: number }> = {
-      "1ère": { sent: 0, success: 0, totalResponseTime: 0, responseCount: 0 },
-      "2ème": { sent: 0, success: 0, totalResponseTime: 0, responseCount: 0 },
-      "3ème": { sent: 0, success: 0, totalResponseTime: 0, responseCount: 0 },
-    };
-
-    reminders.forEach((reminder) => {
-      const count = reminder.debt?.reminderCount || 1;
-      const numberKey = count === 1 ? "1ère" : count === 2 ? "2ème" : "3ème";
-
-      if (reminderNumberStats[numberKey]) {
-        reminderNumberStats[numberKey].sent++;
-        if (reminder.responseReceived) {
-          reminderNumberStats[numberKey].success++;
-          if (reminder.respondedAt && reminder.sentAt) {
-            const responseTime = differenceInDays(
-              new Date(reminder.respondedAt),
-              new Date(reminder.sentAt)
-            );
-            reminderNumberStats[numberKey].totalResponseTime += Math.max(0, responseTime);
-            reminderNumberStats[numberKey].responseCount++;
-          }
-        }
-      }
-    });
-
-    const reminderNumberData = Object.entries(reminderNumberStats).map(([number, data]) => ({
-      reminderNumber: number,
-      sent: data.sent,
-      successRate: data.sent > 0 ? Math.round((data.success / data.sent) * 100) : 0,
-      avgResponseTime:
-        data.responseCount > 0
-          ? Math.round(data.totalResponseTime / data.responseCount)
-          : 0,
-    }));
-
-    // ========================================
-    // PAYMENT PREDICTION DATA
-    // ========================================
-    const predictionData = [];
-    for (let i = 0; i < 30; i++) {
-      const date = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
-      const expected = Math.round(Math.random() * 5000000 + 1000000);
-      const variance = expected * 0.2;
-      predictionData.push({
-        date: format(date, "d MMM"),
-        expected,
-        lower: Math.round(expected - variance),
-        upper: Math.round(expected + variance),
-        confidence: Math.round(85 + Math.random() * 10),
-      });
-    }
-
-    const predictionSummary = {
-      totalExpected: predictionData.reduce((sum, d) => sum + d.expected, 0),
-      confidence: Math.round(85 + Math.random() * 10),
-      factors: [
-        { name: "Historique de paiement", impact: "positive" as const, value: 25 },
-        { name: "Relances récentes", impact: "neutral" as const, value: 15 },
-        { name: "Score de risque client", impact: "negative" as const, value: -10 },
-        { name: "Saisonnalité", impact: "positive" as const, value: 20 },
-      ],
-    };
-
-    // ========================================
+    // =====================================================
     // TOP DEBTORS
-    // ========================================
-    const clientDebts: Record<
-      string,
-      {
-        id: string;
-        name: string;
-        company: string | null;
-        email: string | null;
-        phone: string | null;
-        totalDebt: number;
-        paidAmount: number;
-        debtCount: number;
-        riskLevel: string | null;
-        daysOverdue: number;
-        lastReminder: string | null;
-      }
-    > = {};
+    // =====================================================
+    
+    const clientDebts: Record<string, {
+      id: string;
+      name: string;
+      total: number;
+      paid: number;
+      count: number;
+      riskScore?: number;
+      riskLevel?: string;
+    }> = {};
 
     debts.forEach((debt) => {
       const clientId = debt.clientId;
-      const client = debt.client;
-
+      const client = debt.client as { name: string; id: string; riskScore?: number; riskLevel?: string } | null;
+      
       if (!clientDebts[clientId]) {
         clientDebts[clientId] = {
           id: clientId,
           name: client?.name || "Client inconnu",
-          company: client?.company || null,
-          email: client?.email || null,
-          phone: client?.phone || null,
-          totalDebt: 0,
-          paidAmount: 0,
-          debtCount: 0,
-          riskLevel: client?.riskLevel || null,
-          daysOverdue: 0,
-          lastReminder: null,
+          total: 0,
+          paid: 0,
+          count: 0,
+          riskScore: client?.riskScore,
+          riskLevel: client?.riskLevel,
         };
       }
+      clientDebts[clientId].total += debt.amount - debt.paidAmount;
+      clientDebts[clientId].paid += debt.paidAmount;
+      clientDebts[clientId].count++;
+    });
 
-      if (debt.status !== "paid" && debt.status !== "cancelled") {
-        const remaining = debt.amount - debt.paidAmount;
-        clientDebts[clientId].totalDebt += remaining;
-        clientDebts[clientId].paidAmount += debt.paidAmount;
-        clientDebts[clientId].debtCount++;
+    const topDebtors = Object.values(clientDebts)
+      .filter(c => c.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10)
+      .map(d => ({
+        id: d.id,
+        name: d.name.length > 15 ? d.name.substring(0, 15) + "..." : d.name,
+        fullName: d.name,
+        amount: d.total,
+        paid: d.paid,
+        count: d.count,
+        riskScore: d.riskScore,
+        riskLevel: d.riskLevel as "low" | "medium" | "high" | undefined,
+      }));
 
-        const daysOver = Math.ceil(
-          (now.getTime() - new Date(debt.dueDate).getTime()) / (1000 * 60 * 60 * 24)
-        );
-        if (daysOver > clientDebts[clientId].daysOverdue) {
-          clientDebts[clientId].daysOverdue = daysOver;
+    // =====================================================
+    // REMINDERS CHART DATA
+    // =====================================================
+    
+    const remindersByDay: Record<string, { date: string; email: number; whatsapp: number; total: number; responses: number }> = {};
+
+    // Initialize last 14 days
+    for (let i = 13; i >= 0; i--) {
+      const day = subDays(now, i);
+      const key = format(day, "dd MMM");
+      remindersByDay[key] = {
+        date: key,
+        email: 0,
+        whatsapp: 0,
+        total: 0,
+        responses: 0,
+      };
+    }
+
+    reminders.forEach((reminder) => {
+      const date = new Date(reminder.sentAt || reminder.createdAt);
+      const key = format(date, "dd MMM");
+      
+      if (remindersByDay[key]) {
+        remindersByDay[key].total++;
+        if (reminder.type === "email") {
+          remindersByDay[key].email++;
+        } else if (reminder.type === "whatsapp") {
+          remindersByDay[key].whatsapp++;
         }
-
-        if (debt.reminders.length > 0) {
-          const latest = debt.reminders[0].createdAt;
-          if (!clientDebts[clientId].lastReminder || latest > clientDebts[clientId].lastReminder!) {
-            clientDebts[clientId].lastReminder = latest.toISOString();
-          }
+        if (reminder.responseReceived) {
+          remindersByDay[key].responses++;
         }
       }
     });
 
-    const topDebtors = Object.values(clientDebts)
-      .filter((d) => d.totalDebt > 0)
-      .sort((a, b) => b.totalDebt - a.totalDebt)
-      .slice(0, 10);
+    const remindersChartData = Object.values(remindersByDay).map(d => ({
+      ...d,
+      responseRate: d.total > 0 ? Math.round((d.responses / d.total) * 100) : 0,
+    }));
 
-    // ========================================
-    // TREND ANALYSIS
-    // ========================================
-    const monthlyData = [];
-    for (let i = 11; i >= 0; i--) {
-      const monthDate = subMonths(now, i);
-      const monthStart = startOfMonth(monthDate);
-      const monthEnd = endOfMonth(monthDate);
+    // =====================================================
+    // PAYMENT PREDICTIONS (AI-simulated)
+    // =====================================================
+    
+    const paymentPredictions = debts
+      .filter(d => d.status !== "paid" && d.status !== "cancelled")
+      .slice(0, 10)
+      .map(debt => {
+        // Simulate AI prediction based on various factors
+        const client = debt.client as { name: string } | null;
+        const daysOverdue = Math.ceil((now.getTime() - new Date(debt.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+        const reminderCount = debt.reminderCount;
+        
+        // Simple prediction algorithm (in real app, this would be AI)
+        let baseProbability = 70;
+        
+        // Adjust based on days overdue
+        if (daysOverdue > 60) baseProbability -= 30;
+        else if (daysOverdue > 30) baseProbability -= 20;
+        else if (daysOverdue > 14) baseProbability -= 10;
+        
+        // Adjust based on reminder count
+        if (reminderCount >= 3) baseProbability -= 15;
+        else if (reminderCount >= 2) baseProbability -= 5;
+        
+        // Add some randomness
+        const probability = Math.max(5, Math.min(95, baseProbability + Math.floor(Math.random() * 20) - 10));
+        
+        // Determine risk level
+        let riskLevel: "very_low" | "low" | "medium" | "high" | "very_high";
+        if (probability >= 80) riskLevel = "very_high";
+        else if (probability >= 60) riskLevel = "high";
+        else if (probability >= 40) riskLevel = "medium";
+        else if (probability >= 20) riskLevel = "low";
+        else riskLevel = "very_low";
 
-      const monthDebts = debts.filter(
-        (d) => d.createdAt >= monthStart && d.createdAt <= monthEnd
+        // Predict payment date
+        const predictedDays = Math.round(30 + (100 - probability) * 0.5);
+        const predictedDate = format(subDays(now, -predictedDays), "dd MMM yyyy");
+
+        return {
+          id: debt.id,
+          reference: debt.reference || `#${debt.id.slice(0, 8)}`,
+          clientName: client?.name || "Client inconnu",
+          amount: debt.amount - debt.paidAmount,
+          probability,
+          riskLevel,
+          predictedDate,
+        };
+      })
+      .sort((a, b) => b.probability - a.probability);
+
+    // =====================================================
+    // KPIs
+    // =====================================================
+    
+    // Recovery rate
+    const recoveryRate = totalAmount > 0 ? Math.round((paidAmount / totalAmount) * 100) : 0;
+    const previousRecoveryRate = previousTotalAmount > 0 
+      ? Math.round((previousPaidAmount / previousTotalAmount) * 100) 
+      : 0;
+
+    // Average payment delay
+    const paidDebts = debts.filter(d => d.status === "paid" && d.paidDate);
+    const avgPaymentDelay = paidDebts.length > 0
+      ? Math.round(
+          paidDebts.reduce((sum, debt) => {
+            const issueDate = debt.issueDate ? new Date(debt.issueDate) : new Date(debt.createdAt || Date.now());
+            const paidDate = new Date(debt.paidDate!);
+            return sum + differenceInDays(paidDate, issueDate);
+          }, 0) / paidDebts.length
+        )
+      : 0;
+
+    // Response rate
+    const remindersWithResponse = reminders.filter(r => r.responseReceived);
+    const responseRate = reminders.length > 0 
+      ? Math.round((remindersWithResponse.length / reminders.length) * 100) 
+      : 0;
+
+    // Average debt amount
+    const avgDebtAmount = debts.length > 0 
+      ? Math.round(totalAmount / debts.length) 
+      : 0;
+
+    // Active clients (with pending debts)
+    const activeClients = new Set(
+      debts.filter(d => d.status !== "paid" && d.status !== "cancelled").map(d => d.clientId)
+    ).size;
+
+    // ROI (simplified calculation)
+    // Assume subscription saves 2 hours per week at $50/hour
+    const hoursSavedPerMonth = 8;
+    const hourlyRate = 50; // in GNF equivalent
+    const subscriptionCost = 15000; // starter plan in GNF
+    const timeValue = hoursSavedPerMonth * hourlyRate * 4; // per month
+    const roiPercentage = subscriptionCost > 0 
+      ? Math.round(((timeValue - subscriptionCost) / subscriptionCost) * 100) 
+      : 0;
+
+    // Overdue count
+    const overdueDebts = debts.filter((debt) => {
+      if (debt.status === "paid" || debt.status === "cancelled") return false;
+      const daysOverdue = Math.ceil(
+        (now.getTime() - new Date(debt.dueDate).getTime()) / (1000 * 60 * 60 * 24)
       );
-      const previousMonthDebts = debts.filter(
-        (d) =>
-          d.createdAt >= subMonths(monthStart, 1) &&
-          d.createdAt < monthStart
+      return daysOverdue > 0;
+    });
+
+    // =====================================================
+    // ALERTS
+    // =====================================================
+    
+    const criticalDebts = overdueDebts.filter(debt => {
+      const daysOverdue = Math.ceil(
+        (now.getTime() - new Date(debt.dueDate).getTime()) / (1000 * 60 * 60 * 24)
       );
+      return daysOverdue > 30;
+    }).slice(0, 5).map(d => ({
+      id: d.id,
+      clientName: (d.client as { name: string })?.name || "Client inconnu",
+      amount: d.amount - d.paidAmount,
+      currency: d.currency,
+      daysOverdue: Math.ceil(
+        (now.getTime() - new Date(d.dueDate).getTime()) / (1000 * 60 * 60 * 24)
+      ),
+      reference: d.reference,
+    }));
 
-      const current = monthDebts
-        .filter((d) => d.status === "paid" && d.paidDate)
-        .reduce((sum, d) => sum + d.paidAmount, 0);
-      const previous = previousMonthDebts
-        .filter((d) => d.status === "paid" && d.paidDate)
-        .reduce((sum, d) => sum + d.paidAmount, 0);
+    // =====================================================
+    // AGING BUCKETS
+    // =====================================================
+    
+    const agingBuckets = [
+      { range: "0-7", label: "0-7 jours", count: 0, amount: 0, percentage: 0, color: "#22c55e" },
+      { range: "8-14", label: "8-14 jours", count: 0, amount: 0, percentage: 0, color: "#84cc16" },
+      { range: "15-30", label: "15-30 jours", count: 0, amount: 0, percentage: 0, color: "#f59e0b" },
+      { range: "31-60", label: "31-60 jours", count: 0, amount: 0, percentage: 0, color: "#f97316" },
+      { range: "60+", label: "Plus de 60 jours", count: 0, amount: 0, percentage: 0, color: "#ef4444" },
+    ];
+    
+    const activeDebts = debts.filter(d => d.status !== "paid" && d.status !== "cancelled");
+    const totalActiveAmount = activeDebts.reduce((sum, d) => sum + (d.amount - d.paidAmount), 0);
+    
+    activeDebts.forEach(debt => {
+      const daysOverdue = Math.ceil((now.getTime() - new Date(debt.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+      const remainingAmount = debt.amount - debt.paidAmount;
+      
+      if (daysOverdue > 0) {
+        if (daysOverdue <= 7) {
+          agingBuckets[0].count++;
+          agingBuckets[0].amount += remainingAmount;
+        } else if (daysOverdue <= 14) {
+          agingBuckets[1].count++;
+          agingBuckets[1].amount += remainingAmount;
+        } else if (daysOverdue <= 30) {
+          agingBuckets[2].count++;
+          agingBuckets[2].amount += remainingAmount;
+        } else if (daysOverdue <= 60) {
+          agingBuckets[3].count++;
+          agingBuckets[3].amount += remainingAmount;
+        } else {
+          agingBuckets[4].count++;
+          agingBuckets[4].amount += remainingAmount;
+        }
+      }
+    });
+    
+    // Calculate percentages
+    agingBuckets.forEach(bucket => {
+      bucket.percentage = totalActiveAmount > 0 
+        ? Math.round((bucket.amount / totalActiveAmount) * 100) 
+        : 0;
+    });
 
-      monthlyData.push({
-        period: format(monthDate, "MMM yy"),
-        current,
-        previous: previous || undefined,
-        previousYear: Math.round(current * (0.8 + Math.random() * 0.4)),
-      });
-    }
+    // =====================================================
+    // RISK DISTRIBUTION
+    // =====================================================
+    
+    const riskDistribution = [
+      { level: "high", label: "Risque élevé", count: 0, amount: 0, color: "#ef4444" },
+      { level: "medium", label: "Risque moyen", count: 0, amount: 0, color: "#f59e0b" },
+      { level: "low", label: "Risque faible", count: 0, amount: 0, color: "#22c55e" },
+      { level: "unknown", label: "Non évalué", count: 0, amount: 0, color: "#6b7280" },
+    ];
+    
+    // Map client risk levels
+    const clientRiskMap = new Map<string, string>();
+    clients.forEach(client => {
+      clientRiskMap.set(client.id, client.riskLevel || "unknown");
+    });
+    
+    activeDebts.forEach(debt => {
+      const riskLevel = clientRiskMap.get(debt.clientId) || "unknown";
+      const remainingAmount = debt.amount - debt.paidAmount;
+      
+      const dist = riskDistribution.find(d => d.level === riskLevel);
+      if (dist) {
+        dist.count++;
+        dist.amount += remainingAmount;
+      }
+    });
 
-    const seasonalPatterns = [];
-    for (let i = 0; i < 12; i++) {
-      const monthName = format(new Date(2024, i, 1), "MMM");
-      seasonalPatterns.push({
-        month: monthName,
-        avgCollection: Math.round(Math.random() * 5000000 + 2000000),
-        index: Math.round(80 + Math.random() * 40),
-      });
-    }
+    // =====================================================
+    // REVENUE BY PERIOD
+    // =====================================================
+    
+    const revenueByPeriod = recoveryChartData.map(item => ({
+      period: item.month,
+      revenue: item.recovered,
+      count: undefined,
+    }));
 
-    const monthlyCollections = monthlyData.map((d) => d.current);
-    const avgMonthlyCollection = monthlyCollections.length > 0
-      ? monthlyCollections.reduce((sum, v) => sum + v, 0) / monthlyCollections.length
-      : 0;
+    // =====================================================
+    // BUILD RESPONSE
+    // =====================================================
 
-    const momChange = monthlyData.length >= 2
-      ? monthlyData[monthlyData.length - 1].current - (monthlyData[monthlyData.length - 2].current || 0)
-      : 0;
-
-    const yoyChange = monthlyData.length >= 12
-      ? monthlyData[monthlyData.length - 1].current - (monthlyData[0].previousYear || 0)
-      : 0;
-
-    const maxCollection = Math.max(...monthlyCollections);
-    const minCollection = Math.min(...monthlyCollections);
-    const bestMonthIndex = monthlyCollections.indexOf(maxCollection);
-    const worstMonthIndex = monthlyCollections.indexOf(minCollection);
-
-    const trendData = {
-      monthlyData,
-      seasonalPatterns,
-      metrics: {
-        momChange,
-        yoyChange,
-        avgMonthlyCollection: Math.round(avgMonthlyCollection),
-        bestMonth: monthlyData[bestMonthIndex]?.period || "N/A",
-        worstMonth: monthlyData[worstMonthIndex]?.period || "N/A",
-      },
-    };
-
-    // ========================================
-    // COMPILE RESPONSE
-    // ========================================
     const response = {
-      kpis,
-      previousKpis,
-      collectionData,
-      previousCollectionData,
-      debtStatusData,
-      clientRiskData,
-      reminderChannelData,
-      reminderNumberData,
-      predictionData,
-      predictionSummary,
-      topDebtors,
-      trendData,
-      dateRange: {
-        start: startDate.toISOString(),
-        end: endDate.toISOString(),
+      // Summary stats
+      summary: {
+        totalAmount,
+        paidAmount,
+        pendingAmount,
+        reminderCount: reminders.length,
+        previousTotalAmount,
+        previousPaidAmount,
+        previousPendingAmount,
+        previousReminderCount: reminders.filter(r => 
+          new Date(r.createdAt) >= previousFromDate && new Date(r.createdAt) <= previousToDate
+        ).length,
+        sparklineData,
       },
-      currency,
+      
+      // Chart data
+      charts: {
+        recovery: recoveryChartData,
+        debtStatus: debtStatusData,
+        reminders: remindersChartData,
+        topDebtors,
+        paymentPredictions,
+      },
+      
+      // KPIs
+      kpis: {
+        recoveryRate,
+        previousRecoveryRate,
+        avgPaymentDelay,
+        responseRate,
+        avgDebtAmount,
+        activeClients,
+        roiPercentage,
+        totalDebts: debts.length,
+        totalClients: clients.length,
+        overdueCount: overdueDebts.length,
+      },
+      
+      // Alerts
+      alerts: {
+        criticalDebts,
+        overdueCount: overdueDebts.length,
+        overdueAmount: overdueDebts.reduce((sum, d) => sum + (d.amount - d.paidAmount), 0),
+      },
+      
+      // New data for advanced analytics
+      aging: agingBuckets,
+      riskDistribution: riskDistribution.filter(d => d.count > 0),
+      revenueByPeriod,
     };
-
-    // Cache the response
-    setCachedData(cacheKey, response);
 
     return NextResponse.json(response);
   } catch (error) {

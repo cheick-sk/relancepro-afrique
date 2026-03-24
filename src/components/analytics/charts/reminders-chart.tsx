@@ -1,258 +1,272 @@
 "use client";
 
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  Area,
-  ComposedChart,
-} from "recharts";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   ChartConfig,
   ChartContainer,
+  ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { BellRing, Mail, MessageSquare, TrendingUp } from "lucide-react";
+import {
+  BarChart as RechartsBarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  Legend,
+  Line,
+  ComposedChart,
+} from "recharts";
+import { Mail, MessageCircle, CheckCircle } from "lucide-react";
 
-interface RemindersChartData {
-  month: string;
-  sent: number;
-  successful: number;
-  rate: number;
+export interface ReminderChartData {
+  date: string;
+  email: number;
+  whatsapp: number;
+  total: number;
+  responses?: number;
+  responseRate?: number;
 }
 
 interface RemindersChartProps {
-  data: RemindersChartData[];
+  data: ReminderChartData[];
+  title?: string;
+  description?: string;
   loading?: boolean;
-  effectivenessData?: {
-    type: string;
-    sent: number;
-    delivered: number;
-    opened: number;
-    responded: number;
-    successRate: number;
-  }[];
+  showResponseRate?: boolean;
 }
 
 const chartConfig = {
-  sent: {
-    label: "Envoyées",
-    color: "hsl(215, 16%, 47%)", // Gray
+  email: {
+    label: "Email",
+    color: "#3b82f6",
   },
-  successful: {
-    label: "Réussies",
-    color: "hsl(142, 76%, 36%)", // Green
+  whatsapp: {
+    label: "WhatsApp",
+    color: "#22c55e",
   },
-  rate: {
-    label: "Taux (%)",
-    color: "hsl(24, 95%, 53%)", // Orange
+  responseRate: {
+    label: "Taux de réponse",
+    color: "#f59e0b",
   },
 } satisfies ChartConfig;
 
 export function RemindersChart({
   data,
-  loading,
-  effectivenessData,
+  title = "Relances envoyées",
+  description = "Par type de canal",
+  loading = false,
+  showResponseRate = true,
 }: RemindersChartProps) {
   if (loading) {
     return (
-      <Card>
+      <Card className="h-full">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <BellRing className="h-5 w-5 text-orange-500" />
-            Efficacité des Relances
-          </CardTitle>
-          <CardDescription>Suivi des performances des relances</CardDescription>
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-4 w-32" />
         </CardHeader>
         <CardContent>
-          <div className="h-[350px] flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
-          </div>
+          <Skeleton className="h-[300px] w-full" />
         </CardContent>
       </Card>
     );
   }
 
-  const totalSent = data.reduce((sum, item) => sum + item.sent, 0);
-  const totalSuccessful = data.reduce((sum, item) => sum + item.successful, 0);
-  const avgSuccessRate = totalSent > 0 ? Math.round((totalSuccessful / totalSent) * 100) : 0;
-
-  // Calculate channel effectiveness if provided
-  const channelStats = effectivenessData?.reduce(
-    (acc, item) => {
-      acc[item.type] = item;
-      return acc;
-    },
-    {} as Record<string, typeof effectivenessData[0]>
-  );
+  // Calculate totals
+  const totalEmail = data.reduce((sum, d) => sum + d.email, 0);
+  const totalWhatsapp = data.reduce((sum, d) => sum + d.whatsapp, 0);
+  const totalReminders = totalEmail + totalWhatsapp;
+  const avgResponseRate = data.length > 0
+    ? Math.round(data.reduce((sum, d) => sum + (d.responseRate || 0), 0) / data.length)
+    : 0;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BellRing className="h-5 w-5 text-orange-500" />
-          Efficacité des Relances
+    <Card className="h-full">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg font-semibold flex items-center gap-2">
+          <Mail className="h-5 w-5 text-orange-500" />
+          {title}
         </CardTitle>
-        <CardDescription>Suivi des performances des relances dans le temps</CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        {/* Channel Stats */}
-        {channelStats && (
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            {Object.entries(channelStats).map(([type, stats]) => (
-              <div
-                key={type}
-                className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  {type === "Email" ? (
-                    <Mail className="h-5 w-5 text-blue-500" />
-                  ) : (
-                    <MessageSquare className="h-5 w-5 text-green-500" />
-                  )}
-                  <span className="font-medium text-gray-900 dark:text-white">{type}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <p className="text-gray-500">Envoyées</p>
-                    <p className="font-semibold text-gray-900 dark:text-white">{stats.sent}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500">Réussies</p>
-                    <p className="font-semibold text-green-600">{stats.successRate}%</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Main Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 text-center">
-            <p className="text-3xl font-bold text-gray-900 dark:text-white">{totalSent}</p>
-            <p className="text-sm text-gray-500">Total envoyées</p>
-          </div>
-          <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 text-center">
-            <p className="text-3xl font-bold text-green-600">{totalSuccessful}</p>
-            <p className="text-sm text-gray-500">Réussies</p>
-          </div>
-          <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-4 text-center">
-            <div className="flex items-center justify-center gap-1">
-              <TrendingUp className="h-5 w-5 text-orange-500" />
-              <p className="text-3xl font-bold text-orange-600">{avgSuccessRate}%</p>
+        {/* Summary stats */}
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="text-center p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <Mail className="h-4 w-4 text-blue-500" />
+              <span className="text-xs text-muted-foreground">Email</span>
             </div>
-            <p className="text-sm text-gray-500">Taux moyen</p>
+            <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{totalEmail}</p>
+          </div>
+          <div className="text-center p-2 bg-green-50 dark:bg-green-900/20 rounded-lg">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <MessageCircle className="h-4 w-4 text-green-500" />
+              <span className="text-xs text-muted-foreground">WhatsApp</span>
+            </div>
+            <p className="text-lg font-bold text-green-600 dark:text-green-400">{totalWhatsapp}</p>
+          </div>
+          <div className="text-center p-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <CheckCircle className="h-4 w-4 text-orange-500" />
+              <span className="text-xs text-muted-foreground">Réponses</span>
+            </div>
+            <p className="text-lg font-bold text-orange-600 dark:text-orange-400">{avgResponseRate}%</p>
           </div>
         </div>
 
-        {/* Chart */}
-        <div className="h-[280px]">
-          <ChartContainer config={chartConfig} className="h-full w-full">
-            <ResponsiveContainer>
-              <ComposedChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="sentGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(215, 16%, 47%)" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="hsl(215, 16%, 47%)" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="successfulGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(142, 76%, 36%)" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="hsl(142, 76%, 36%)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis
-                  dataKey="month"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  className="text-xs"
-                />
-                <YAxis
-                  yAxisId="left"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  className="text-xs"
-                />
-                <YAxis
-                  yAxisId="right"
-                  orientation="right"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  domain={[0, 100]}
-                  className="text-xs"
-                  tickFormatter={(value) => `${value}%`}
-                />
-                <Tooltip
-                  content={
-                    <ChartTooltipContent
-                      formatter={(value, name) => {
-                        if (name === "rate") {
-                          return [`${value}%`, "Taux de succès"];
-                        }
-                        return [value, name === "sent" ? "Envoyées" : "Réussies"];
-                      }}
-                    />
-                  }
-                />
-                <Legend
-                  formatter={(value) => (
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      {value === "sent" ? "Envoyées" : value === "successful" ? "Réussies" : "Taux"}
-                    </span>
-                  )}
-                />
-                <Area
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="sent"
-                  stroke="hsl(215, 16%, 47%)"
-                  fill="url(#sentGradient)"
-                  strokeWidth={2}
-                />
-                <Area
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="successful"
-                  stroke="hsl(142, 76%, 36%)"
-                  fill="url(#successfulGradient)"
-                  strokeWidth={2}
-                />
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="rate"
-                  stroke="hsl(24, 95%, 53%)"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  dot={{ fill: "hsl(24, 95%, 53%)", strokeWidth: 2, r: 3 }}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </ChartContainer>
-        </div>
-
-        {/* Performance Insight */}
-        <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-          <p className="text-sm text-blue-700 dark:text-blue-400">
-            <strong>Insight:</strong> Le taux de succès moyen de vos relances est de{" "}
-            <strong>{avgSuccessRate}%</strong>. 
-            {avgSuccessRate >= 50 ? (
-              <span> Continuez ainsi ! Les relances sont efficaces.</span>
-            ) : (
-              <span> Envisagez de personnaliser vos messages avec l&apos;IA.</span>
+        <ChartContainer config={chartConfig} className="h-[280px] w-full">
+          <ComposedChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
+            <XAxis
+              dataKey="date"
+              tickLine={false}
+              axisLine={false}
+              tickMargin={8}
+              className="text-xs"
+              tick={{ fill: "currentColor", opacity: 0.7 }}
+              angle={-45}
+              textAnchor="end"
+              height={60}
+            />
+            <YAxis
+              yAxisId="left"
+              tickLine={false}
+              axisLine={false}
+              tickMargin={8}
+              className="text-xs"
+              tick={{ fill: "currentColor", opacity: 0.7 }}
+            />
+            {showResponseRate && (
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                tickFormatter={(value) => `${value}%`}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                className="text-xs"
+                tick={{ fill: "currentColor", opacity: 0.7 }}
+                domain={[0, 100]}
+              />
             )}
-          </p>
+            <ChartTooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+
+                return (
+                  <div className="rounded-lg border bg-background p-3 shadow-md">
+                    <p className="font-medium text-sm mb-2 text-muted-foreground">{label}</p>
+                    <div className="space-y-1">
+                      {payload.map((entry, index) => (
+                        <div key={index} className="flex items-center gap-2 text-sm">
+                          <div
+                            className="h-2.5 w-2.5 rounded-full"
+                            style={{ backgroundColor: entry.color }}
+                          />
+                          <span className="text-muted-foreground">
+                            {entry.name === "email"
+                              ? "Email"
+                              : entry.name === "whatsapp"
+                              ? "WhatsApp"
+                              : "Taux de réponse"}
+                            :
+                          </span>
+                          <span className="font-semibold">
+                            {entry.name === "responseRate"
+                              ? `${entry.value}%`
+                              : entry.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }}
+            />
+            <Bar
+              yAxisId="left"
+              dataKey="email"
+              fill="#3b82f6"
+              radius={[4, 4, 0, 0]}
+              name="email"
+            />
+            <Bar
+              yAxisId="left"
+              dataKey="whatsapp"
+              fill="#22c55e"
+              radius={[4, 4, 0, 0]}
+              name="whatsapp"
+            />
+            {showResponseRate && (
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="responseRate"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                dot={{ fill: "#f59e0b", strokeWidth: 2, r: 3 }}
+                name="responseRate"
+              />
+            )}
+          </ComposedChart>
+        </ChartContainer>
+
+        {/* Legend */}
+        <div className="flex items-center justify-center gap-6 mt-4 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <div className="h-3 w-3 rounded bg-blue-500" />
+            <span>Email</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-3 w-3 rounded bg-green-500" />
+            <span>WhatsApp</span>
+          </div>
+          {showResponseRate && (
+            <div className="flex items-center gap-2">
+              <div className="h-0.5 w-3 bg-orange-500" />
+              <span>Taux de réponse (%)</span>
+            </div>
+          )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Simple bar chart version
+export function RemindersChartSimple({ data }: { data: ReminderChartData[] }) {
+  return (
+    <ChartContainer config={chartConfig} className="h-[200px] w-full">
+      <RechartsBarChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
+        <XAxis dataKey="date" tickLine={false} axisLine={false} />
+        <YAxis tickLine={false} axisLine={false} />
+        <ChartTooltip content={<ChartTooltipContent />} />
+        <Bar dataKey="email" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="whatsapp" fill="#22c55e" radius={[4, 4, 0, 0]} />
+      </RechartsBarChart>
+    </ChartContainer>
+  );
+}
+
+// Skeleton component
+export function RemindersChartSkeleton() {
+  return (
+    <Card className="h-full">
+      <CardHeader className="pb-2">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-4 w-32 mt-1" />
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full" />
+          ))}
+        </div>
+        <Skeleton className="h-[280px] w-full" />
       </CardContent>
     </Card>
   );

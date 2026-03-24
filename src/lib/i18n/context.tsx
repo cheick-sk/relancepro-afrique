@@ -1,74 +1,70 @@
-"use client";
+"use client"
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { Locale, defaultLocale, localeNames, localeFlags } from "./config";
-import { getTranslation } from "./translations";
+import React, { createContext, useContext, useState } from "react"
+
+type Language = "fr" | "en"
 
 interface LanguageContextType {
-  locale: Locale;
-  setLocale: (locale: Locale) => void;
-  t: (key: string, params?: Record<string, string | number>) => string;
-  localeName: string;
-  localeFlag: string;
+  language: Language
+  setLanguage: (lang: Language) => void
+  t: (key: string) => string
 }
 
-const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
-
-function getStoredLocale(): Locale {
-  if (typeof window === "undefined") return defaultLocale;
-  const saved = localStorage.getItem("locale") as Locale;
-  if (saved === "fr" || saved === "en") return saved;
-  return defaultLocale;
+const translations: Record<Language, Record<string, string>> = {
+  fr: {
+    "common.save": "Enregistrer",
+    "common.cancel": "Annuler",
+    "common.delete": "Supprimer",
+    "common.edit": "Modifier",
+    "common.add": "Ajouter",
+    "common.search": "Rechercher",
+    "common.loading": "Chargement...",
+    "nav.dashboard": "Tableau de bord",
+    "nav.clients": "Clients",
+    "nav.debts": "Créances",
+    "nav.reminders": "Relances",
+    "nav.settings": "Paramètres",
+  },
+  en: {
+    "common.save": "Save",
+    "common.cancel": "Cancel",
+    "common.delete": "Delete",
+    "common.edit": "Edit",
+    "common.add": "Add",
+    "common.search": "Search",
+    "common.loading": "Loading...",
+    "nav.dashboard": "Dashboard",
+    "nav.clients": "Clients",
+    "nav.debts": "Debts",
+    "nav.reminders": "Reminders",
+    "nav.settings": "Settings",
+  },
 }
 
-export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(() => getStoredLocale());
+const LanguageContext = createContext<LanguageContextType | undefined>(undefined)
 
-  useEffect(() => {
-    document.documentElement.lang = locale;
-  }, [locale]);
+export function LanguageProvider({ children }: { children: React.ReactNode }) {
+  const [language, setLanguage] = useState<Language>("fr")
 
-  const setLocale = (newLocale: Locale) => {
-    setLocaleState(newLocale);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("locale", newLocale);
-    }
-  };
-
-  const t = (key: string, params?: Record<string, string | number>): string => {
-    const translation = getTranslation(locale);
-    let text = translation[key] || key;
-
-    if (params) {
-      Object.entries(params).forEach(([k, v]) => {
-        text = text.replace(`{{${k}}}`, String(v));
-      });
-    }
-
-    return text;
-  };
+  const t = (key: string): string => {
+    return translations[language][key] || key
+  }
 
   return (
-    <LanguageContext.Provider
-      value={{
-        locale,
-        setLocale,
-        t,
-        localeName: localeNames[locale],
-        localeFlag: localeFlags[locale],
-      }}
-    >
+    <LanguageContext.Provider value={{ language, setLanguage, t }}>
       {children}
     </LanguageContext.Provider>
-  );
+  )
 }
 
 export function useLanguage() {
-  const context = useContext(LanguageContext);
-  if (context === undefined) {
-    throw new Error("useLanguage must be used within a LanguageProvider");
+  const context = useContext(LanguageContext)
+  if (!context) {
+    return {
+      language: "fr" as Language,
+      setLanguage: () => {},
+      t: (key: string) => key,
+    }
   }
-  return context;
+  return context
 }
-
-export { localeNames, localeFlags };

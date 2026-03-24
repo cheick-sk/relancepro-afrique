@@ -1,9 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
-import { db } from "@/lib/db";
+import { 
+  sendPushNotification, 
+  broadcastNotification,
+  type NotificationType,
+} from "@/lib/push/service";
+import { type PushPayload } from "@/lib/push/config";
 
-// POST - Envoyer une notification push
+interface SendNotificationBody {
+  userId?: string;
+  userIds?: string[];
+  type: NotificationType;
+  payload: {
+    title?: string;
+    body: string;
+    url?: string;
+    id: string;
+    actions?: PushPayload['actions'];
+  };
+}
+
+// POST - Send push notification to user(s)
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -11,49 +29,56 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { userId, payload } = body;
+    const body: SendNotificationBody = await request.json();
+    const { userId, userIds, type, payload } = body;
 
-    // Vérifier que l'utilisateur envoie à lui-même ou est admin
-    if (userId !== session.user.id && session.user.role !== "admin") {
-      return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
-    }
-
-    // Récupérer toutes les subscriptions actives de l'utilisateur
-    const subscriptions = await db.pushSubscription.findMany({
-      where: { profileId: userId },
-    });
-
-    if (subscriptions.length === 0) {
+    // Validate required fields
+    if (!type || !payload || !payload.body || !payload.id) {
       return NextResponse.json(
-        { error: "Aucune subscription active trouvée" },
-        { status: 404 }
+        { error: "Type, payload.body et payload.id sont obligatoires" },
+        { status: 400 }
       );
     }
 
-    // Pour chaque subscription, on enverrait la notification push
-    // En production, il faudrait utiliser une librairie comme web-push
-    // Pour l'instant, on crée juste une notification en base de données
+    // Determine target users
+    let targetUserIds: string[] = [];
     
-    const notification = await db.notification.create({
-      data: {
-        profileId: userId,
-        type: payload.type || "info",
-        title: payload.title,
-        message: payload.body,
-        actionUrl: payload.data?.url,
-        actionLabel: payload.data?.actionLabel,
-      },
-    });
+    if (userIds && Array.isArray(userIds)) {
+      // Admin can send to multiple users
+      if (session.user.role !== "admin") {
+        return NextResponse.json(
+          { error: "Seuls les administrateurs peuvent envoyer à plusieurs utilisateurs" },
+          { status: 403 }
+        );
+      }
+      targetUserIds = userIds;
+    } else if (userId) {
+      // Can only send to self (unless admin)
+      if (userId !== session.user.id && session.user.role !== "admin") {
+        return NextResponse.json(
+          { error: "Non autorisé à envoyer à cet utilisateur" },
+          { status: 403 }
+        );
+      }
+      targetUserIds = [userId];
+    } else {
+      // Default to current user
+      targetUserIds = [session.user.id];
+    }
 
-    // TODO: Envoyer via Web Push si configuré
-    // Pour chaque subscription:
-    // await webpush.sendNotification(subscription, JSON.stringify(payload));
+    let result;
+    
+    if (targetUserIds.length === 1) {
+      result = await sendPushNotification(targetUserIds[0], type, payload);
+    } else {
+      result = await broadcastNotification(targetUserIds, type, payload);
+    }
 
     return NextResponse.json({
-      success: true,
-      notification,
-      subscriptionCount: subscriptions.length,
+      success: result.success,
+      sent: result.sent,
+      failed: result.failed,
+      errors: result.errors.length > 0 ? result.errors : undefined,
     });
   } catch (error) {
     console.error("Error sending push notification:", error);
@@ -62,4 +87,51 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// GET - Get supported notification types (for admin UI)
+export async function GET() {
+  const notificationTypes: Array<{
+    type: NotificationType;
+    title: string;
+    description: string;
+  }> = [
+    {
+      type: "reminder_sent",
+      title: "Relance envoyée",
+      description: "Notification quand une relance est envoyée avec succès",
+    },
+    {
+      type: "reminder_delivered",
+      title: "Relance délivrée",
+      description: "Notification quand une relance est délivrée au client",
+    },
+    {
+      type: "payment_received",
+      title: "Paiement reçu",
+      description: "Notification quand un paiement est enregistré",
+    },
+    {
+      type: "new_debt",
+      title: "Nouvelle créance",
+      description: "Notification quand une nouvelle créance est ajoutée",
+    },
+    {
+      type: "client_responded",
+      title: "Réponse client",
+      description: "Notification quand un client répond à une relance",
+    },
+    {
+      type: "subscription_warning",
+      title: "Avertissement abonnement",
+      description: "Notification quand l'abonnement expire bientôt",
+    },
+    {
+      type: "subscription_expired",
+      title: "Abonnement expiré",
+      description: "Notification quand l'abonnement a expiré",
+    },
+  ];
+
+  return NextResponse.json({ notificationTypes });
 }

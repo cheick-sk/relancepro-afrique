@@ -1,0 +1,774 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "RelancePro Africa API",
+    "description": "API publique pour la gestion des créances clients en Afrique. Support REST et GraphQL.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "RelancePro Africa Support",
+      "email": "support@relancepro.africa"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.relancepro.africa",
+      "description": "Production server"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Development server"
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API Key",
+        "description": "Utilisez votre clé API comme Bearer token. Exemple: Authorization: Bearer rpa_live_xxxxx"
+      }
+    },
+    "schemas": {
+      "Client": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "email": { "type": "string", "nullable": true },
+          "phone": { "type": "string", "nullable": true },
+          "company": { "type": "string", "nullable": true },
+          "address": { "type": "string", "nullable": true },
+          "notes": { "type": "string", "nullable": true },
+          "riskScore": { "type": "integer", "nullable": true },
+          "riskLevel": { "type": "string", "enum": ["low", "medium", "high"], "nullable": true },
+          "status": { "type": "string", "enum": ["active", "inactive", "blacklisted"] },
+          "debtsCount": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Debt": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "reference": { "type": "string", "nullable": true },
+          "description": { "type": "string", "nullable": true },
+          "amount": { "type": "number" },
+          "currency": { "type": "string" },
+          "paidAmount": { "type": "number" },
+          "remainingAmount": { "type": "number" },
+          "status": { "type": "string", "enum": ["pending", "paid", "partial", "disputed", "cancelled"] },
+          "issueDate": { "type": "string", "format": "date-time", "nullable": true },
+          "dueDate": { "type": "string", "format": "date-time" },
+          "paidDate": { "type": "string", "format": "date-time", "nullable": true },
+          "reminderCount": { "type": "integer" },
+          "lastReminderAt": { "type": "string", "format": "date-time", "nullable": true },
+          "paymentProbability": { "type": "number", "nullable": true },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Reminder": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["email", "whatsapp"] },
+          "subject": { "type": "string", "nullable": true },
+          "message": { "type": "string" },
+          "tone": { "type": "string", "enum": ["formal", "friendly", "urgent"], "nullable": true },
+          "status": { "type": "string", "enum": ["pending", "sent", "failed", "delivered", "opened"] },
+          "sentAt": { "type": "string", "format": "date-time", "nullable": true },
+          "deliveredAt": { "type": "string", "format": "date-time", "nullable": true },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Webhook": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "url": { "type": "string" },
+          "events": { "type": "array", "items": { "type": "string" } },
+          "active": { "type": "boolean" },
+          "lastTriggeredAt": { "type": "string", "format": "date-time", "nullable": true },
+          "successCount": { "type": "integer" },
+          "failureCount": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "details": { "type": "object", "nullable": true }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "timestamp": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "integer" },
+          "perPage": { "type": "integer" },
+          "total": { "type": "integer" },
+          "totalPages": { "type": "integer" },
+          "hasMore": { "type": "boolean" }
+        }
+      }
+    },
+    "responses": {
+      "UnauthorizedError": {
+        "description": "Authentication required",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "ForbiddenError": {
+        "description": "Insufficient permissions",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "NotFoundError": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "RateLimitError": {
+        "description": "Rate limit exceeded",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/clients": {
+      "get": {
+        "tags": ["Clients"],
+        "summary": "List clients",
+        "description": "Get a paginated list of clients with optional filtering",
+        "operationId": "listClients",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "perPage", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["active", "inactive", "blacklisted"] } },
+          { "name": "riskLevel", "in": "query", "schema": { "type": "string", "enum": ["low", "medium", "high"] } },
+          { "name": "search", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Client" } },
+                    "meta": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "429": { "$ref": "#/components/responses/RateLimitError" }
+        }
+      },
+      "post": {
+        "tags": ["Clients"],
+        "summary": "Create client",
+        "description": "Create a new client",
+        "operationId": "createClient",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "email": { "type": "string" },
+                  "phone": { "type": "string" },
+                  "company": { "type": "string" },
+                  "address": { "type": "string" },
+                  "notes": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Client created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Client" }
+              }
+            }
+          },
+          "400": { "description": "Validation error" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "409": { "description": "Client with email already exists" }
+        }
+      }
+    },
+    "/api/v1/clients/{id}": {
+      "get": {
+        "tags": ["Clients"],
+        "summary": "Get client details",
+        "operationId": "getClient",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Client" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      },
+      "put": {
+        "tags": ["Clients"],
+        "summary": "Update client",
+        "operationId": "updateClient",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "email": { "type": "string" },
+                  "phone": { "type": "string" },
+                  "company": { "type": "string" },
+                  "address": { "type": "string" },
+                  "notes": { "type": "string" },
+                  "status": { "type": "string", "enum": ["active", "inactive", "blacklisted"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Client updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Client" }
+              }
+            }
+          },
+          "400": { "description": "Validation error" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      },
+      "delete": {
+        "tags": ["Clients"],
+        "summary": "Delete client",
+        "operationId": "deleteClient",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Client deleted" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": { "description": "Cannot delete client with existing debts" }
+        }
+      }
+    },
+    "/api/v1/debts": {
+      "get": {
+        "tags": ["Debts"],
+        "summary": "List debts",
+        "operationId": "listDebts",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "perPage", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "paid", "partial", "disputed", "cancelled"] } },
+          { "name": "clientId", "in": "query", "schema": { "type": "string" } },
+          { "name": "overdue", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Debt" } },
+                    "meta": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      },
+      "post": {
+        "tags": ["Debts"],
+        "summary": "Create debt",
+        "operationId": "createDebt",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["clientId", "amount", "dueDate"],
+                "properties": {
+                  "clientId": { "type": "string" },
+                  "reference": { "type": "string" },
+                  "description": { "type": "string" },
+                  "amount": { "type": "number" },
+                  "currency": { "type": "string", "default": "GNF" },
+                  "dueDate": { "type": "string", "format": "date-time" },
+                  "issueDate": { "type": "string", "format": "date-time" },
+                  "autoRemindEnabled": { "type": "boolean", "default": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Debt created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Debt" }
+              }
+            }
+          },
+          "400": { "description": "Validation error" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "description": "Client not found" }
+        }
+      }
+    },
+    "/api/v1/debts/{id}": {
+      "get": {
+        "tags": ["Debts"],
+        "summary": "Get debt details",
+        "operationId": "getDebt",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Debt" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      },
+      "put": {
+        "tags": ["Debts"],
+        "summary": "Update debt",
+        "operationId": "updateDebt",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reference": { "type": "string" },
+                  "description": { "type": "string" },
+                  "amount": { "type": "number" },
+                  "currency": { "type": "string" },
+                  "dueDate": { "type": "string", "format": "date-time" },
+                  "status": { "type": "string", "enum": ["pending", "paid", "partial", "disputed", "cancelled"] },
+                  "paidAmount": { "type": "number" },
+                  "paidDate": { "type": "string", "format": "date-time" },
+                  "autoRemindEnabled": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Debt updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Debt" }
+              }
+            }
+          },
+          "400": { "description": "Validation error" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      },
+      "delete": {
+        "tags": ["Debts"],
+        "summary": "Delete debt",
+        "operationId": "deleteDebt",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Debt deleted" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      }
+    },
+    "/api/v1/reminders": {
+      "get": {
+        "tags": ["Reminders"],
+        "summary": "List reminders",
+        "operationId": "listReminders",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "perPage", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "sent", "failed", "delivered", "opened"] } },
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["email", "whatsapp"] } },
+          { "name": "clientId", "in": "query", "schema": { "type": "string" } },
+          { "name": "debtId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Reminder" } },
+                    "meta": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      },
+      "post": {
+        "tags": ["Reminders"],
+        "summary": "Create and send reminder",
+        "operationId": "createReminder",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["debtId", "type"],
+                "properties": {
+                  "debtId": { "type": "string" },
+                  "type": { "type": "string", "enum": ["email", "whatsapp"] },
+                  "subject": { "type": "string" },
+                  "message": { "type": "string" },
+                  "tone": { "type": "string", "enum": ["formal", "friendly", "urgent"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reminder created and sent",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Reminder" }
+              }
+            }
+          },
+          "400": { "description": "Validation error" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "description": "Debt not found" },
+          "500": { "description": "Failed to send reminder" }
+        }
+      }
+    },
+    "/api/v1/webhooks": {
+      "get": {
+        "tags": ["Webhooks"],
+        "summary": "List webhooks",
+        "operationId": "listWebhooks",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "perPage", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Webhook" } },
+                    "meta": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      },
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Create webhook",
+        "operationId": "createWebhook",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "url", "events"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "url": { "type": "string", "format": "uri" },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "client.created", "client.updated", "client.deleted",
+                        "debt.created", "debt.updated", "debt.paid", "debt.deleted",
+                        "reminder.sent", "reminder.delivered", "reminder.failed",
+                        "payment.received"
+                      ]
+                    }
+                  },
+                  "active": { "type": "boolean", "default": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Webhook" }
+              }
+            }
+          },
+          "400": { "description": "Validation error" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      },
+      "delete": {
+        "tags": ["Webhooks"],
+        "summary": "Delete webhook",
+        "operationId": "deleteWebhook",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Webhook deleted" },
+          "400": { "description": "Webhook ID required" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      }
+    },
+    "/api/v1/analytics": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get analytics summary",
+        "operationId": "getAnalytics",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Analytics data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "period": {
+                          "type": "object",
+                          "properties": {
+                            "startDate": { "type": "string" },
+                            "endDate": { "type": "string" }
+                          }
+                        },
+                        "clients": {
+                          "type": "object",
+                          "properties": {
+                            "total": { "type": "integer" },
+                            "active": { "type": "integer" },
+                            "new": { "type": "integer" }
+                          }
+                        },
+                        "debts": {
+                          "type": "object",
+                          "properties": {
+                            "total": { "type": "integer" },
+                            "pending": { "type": "integer" },
+                            "paid": { "type": "integer" },
+                            "overdue": { "type": "integer" },
+                            "totalAmount": { "type": "number" },
+                            "paidAmount": { "type": "number" },
+                            "recoveryRate": { "type": "number" }
+                          }
+                        },
+                        "reminders": {
+                          "type": "object",
+                          "properties": {
+                            "total": { "type": "integer" },
+                            "email": { "type": "integer" },
+                            "whatsapp": { "type": "integer" },
+                            "deliveryRate": { "type": "number" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      }
+    },
+    "/api/graphql": {
+      "post": {
+        "tags": ["GraphQL"],
+        "summary": "GraphQL endpoint",
+        "description": "Execute GraphQL queries and mutations",
+        "operationId": "graphql",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                  "query": { "type": "string" },
+                  "variables": { "type": "object" },
+                  "operationName": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "GraphQL response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "object" },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "message": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Clients", "description": "Client management endpoints" },
+    { "name": "Debts", "description": "Debt management endpoints" },
+    { "name": "Reminders", "description": "Reminder management endpoints" },
+    { "name": "Webhooks", "description": "Webhook management endpoints" },
+    { "name": "Analytics", "description": "Analytics endpoints" },
+    { "name": "GraphQL", "description": "GraphQL endpoint" }
+  ]
+}

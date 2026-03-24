@@ -15,8 +15,9 @@ import {
   X,
   MessageSquare,
   BarChart3,
-  Clock,
   FileText,
+  TrendingUp,
+  Scale,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -25,6 +26,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { LanguageSelector } from "@/components/shared/language-selector";
 import { useLanguage } from "@/lib/i18n/context";
+import { PushPermissionCompact } from "@/components/notifications/push-permission";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -49,24 +51,29 @@ export function Sidebar() {
       icon: Receipt,
     },
     {
+      name: t("nav.invoices") || "Factures",
+      href: "/invoices",
+      icon: FileText,
+    },
+    {
       name: t("nav.reminders"),
       href: "/reminders",
       icon: Bell,
     },
     {
-      name: t("nav.scheduler") || "Planificateur",
-      href: "/scheduler",
-      icon: Clock,
-    },
-    {
-      name: t("template.title") || "Modèles",
-      href: "/templates",
-      icon: FileText,
+      name: t("nav.litigation") || "Contentieux",
+      href: "/litigation",
+      icon: Scale,
     },
     {
       name: t("nav.reports"),
       href: "/reports",
       icon: BarChart3,
+    },
+    {
+      name: t("nav.credit") || "Credit",
+      href: "/credit",
+      icon: TrendingUp,
     },
     {
       name: t("nav.subscription"),
@@ -153,6 +160,12 @@ export function Sidebar() {
           {/* Language selector */}
           <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-800">
             <LanguageSelector />
+          </div>
+
+          {/* Push notification toggle */}
+          <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
+            <span className="text-sm text-gray-600 dark:text-gray-400">Notifications</span>
+            <PushPermissionCompact />
           </div>
 
           {/* Quick actions */}

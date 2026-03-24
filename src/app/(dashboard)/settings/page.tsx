@@ -24,8 +24,15 @@ import {
   Bell,
   Save,
   Loader2,
+  BellRing,
+  Clock,
+  Shield,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PushPermission } from "@/components/notifications/push-permission";
+import { NotificationSettings } from "@/components/notifications/notification-settings";
+import { AutomationSettings } from "@/components/settings/automation-settings";
+import { SecuritySettings } from "@/components/settings/security-settings";
 
 interface UserSettings {
   name: string;
@@ -138,22 +145,34 @@ export default function SettingsPage() {
 
       {/* Settings Tabs */}
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
+        <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid">
           <TabsTrigger value="profile" className="gap-2">
             <User className="h-4 w-4" />
-            Profil
+            <span className="hidden sm:inline">Profil</span>
+          </TabsTrigger>
+          <TabsTrigger value="security" className="gap-2">
+            <Shield className="h-4 w-4" />
+            <span className="hidden sm:inline">Sécurité</span>
           </TabsTrigger>
           <TabsTrigger value="email" className="gap-2">
             <Mail className="h-4 w-4" />
-            Email
+            <span className="hidden sm:inline">Email</span>
           </TabsTrigger>
           <TabsTrigger value="whatsapp" className="gap-2">
             <MessageSquare className="h-4 w-4" />
-            WhatsApp
+            <span className="hidden sm:inline">WhatsApp</span>
+          </TabsTrigger>
+          <TabsTrigger value="automation" className="gap-2">
+            <Clock className="h-4 w-4" />
+            <span className="hidden sm:inline">Automatisation</span>
           </TabsTrigger>
           <TabsTrigger value="reminders" className="gap-2">
             <Bell className="h-4 w-4" />
-            Relances
+            <span className="hidden sm:inline">Relances</span>
+          </TabsTrigger>
+          <TabsTrigger value="notifications" className="gap-2">
+            <BellRing className="h-4 w-4" />
+            <span className="hidden sm:inline">Notifications</span>
           </TabsTrigger>
         </TabsList>
 
@@ -209,6 +228,11 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Security Tab */}
+        <TabsContent value="security">
+          <SecuritySettings />
         </TabsContent>
 
         {/* Email Tab */}
@@ -295,6 +319,11 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Automation Tab */}
+        <TabsContent value="automation">
+          <AutomationSettings />
         </TabsContent>
 
         {/* Reminders Tab */}
@@ -392,6 +421,14 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Notifications Tab */}
+        <TabsContent value="notifications" id="notifications">
+          <div className="space-y-6">
+            <PushPermission />
+            <NotificationSettings />
+          </div>
         </TabsContent>
       </Tabs>
     </div>

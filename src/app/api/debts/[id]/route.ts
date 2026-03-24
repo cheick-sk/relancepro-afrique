@@ -56,7 +56,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { reference, description, amount, currency, dueDate, status, paidAmount, paidDate, nextReminderAt } = body;
+    const { reference, description, amount, currency, dueDate, status, paidAmount, paidDate } = body;
 
     // Vérifier que la créance appartient à l'utilisateur
     const existing = await db.debt.findFirst({
@@ -77,7 +77,6 @@ export async function PUT(
     if (status !== undefined) updateData.status = status;
     if (paidAmount !== undefined) updateData.paidAmount = parseFloat(paidAmount);
     if (paidDate !== undefined) updateData.paidDate = paidDate ? new Date(paidDate) : null;
-    if (nextReminderAt !== undefined) updateData.nextReminderAt = nextReminderAt ? new Date(nextReminderAt) : null;
 
     const debt = await db.debt.update({
       where: { id },
@@ -95,14 +94,6 @@ export async function PUT(
       { status: 500 }
     );
   }
-}
-
-// PATCH - Mise à jour partielle d'une créance
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  return PUT(request, { params });
 }
 
 // DELETE - Supprimer une créance

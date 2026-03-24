@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
 import { db } from "@/lib/db";
+import { logClientAction, AuditAction } from "@/lib/audit/logger";
+import { invalidateUserCache } from "@/lib/cache";
 
 // GET - Détails d'un client
 export async function GET(
@@ -35,6 +37,13 @@ export async function GET(
     if (!client) {
       return NextResponse.json({ error: "Client non trouvé" }, { status: 404 });
     }
+
+    // Log client viewed action
+    await logClientAction(AuditAction.CLIENT_VIEWED, client.id, {
+      profileId: session.user.id,
+      clientName: client.name,
+      clientEmail: client.email,
+    });
 
     return NextResponse.json(client);
   } catch (error) {
@@ -83,6 +92,30 @@ export async function PUT(
       },
     });
 
+    // Invalidate cache
+    await invalidateUserCache(session.user.id);
+
+    // Log audit action
+    await logClientAction(AuditAction.CLIENT_UPDATED, client.id, {
+      profileId: session.user.id,
+      clientName: client.name,
+      clientEmail: client.email,
+      oldValues: {
+        name: existing.name,
+        email: existing.email,
+        phone: existing.phone,
+        company: existing.company,
+        status: existing.status,
+      },
+      newValues: {
+        name: client.name,
+        email: client.email,
+        phone: client.phone,
+        company: client.company,
+        status: client.status,
+      },
+    });
+
     return NextResponse.json(client);
   } catch (error) {
     console.error("Error updating client:", error);
@@ -117,6 +150,22 @@ export async function DELETE(
 
     await db.client.delete({
       where: { id },
+    });
+
+    // Invalidate cache
+    await invalidateUserCache(session.user.id);
+
+    // Log audit action
+    await logClientAction(AuditAction.CLIENT_DELETED, id, {
+      profileId: session.user.id,
+      clientName: existing.name,
+      clientEmail: existing.email,
+      oldValues: {
+        name: existing.name,
+        email: existing.email,
+        phone: existing.phone,
+        company: existing.company,
+      },
     });
 
     return NextResponse.json({ message: "Client supprimé" });

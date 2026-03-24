@@ -1,0 +1,221 @@
+# RelancePro Africa - Docker Compose for Development
+# Usage: docker-compose up -d
+
+version: '3.9'
+
+services:
+  # Main Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        NEXT_PUBLIC_APP_VERSION: dev
+    container_name: relancepro-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://relancepro:relancepro@postgres:5432/relancepro
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-dev-secret-key-change-in-production}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - relancepro-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development Application (with hot reload)
+  app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: relancepro-dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://relancepro:relancepro@postgres:5432/relancepro
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-dev-secret-key-change-in-production}
+      - REDIS_URL=redis://redis:6379
+      - WATCHPACK_POLLING=true
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - relancepro-network
+    profiles:
+      - dev
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: relancepro-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=relancepro
+      - POSTGRES_PASSWORD=relancepro
+      - POSTGRES_DB=relancepro
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - relancepro-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relancepro -d relancepro"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Redis Cache (Optional)
+  redis:
+    image: redis:7-alpine
+    container_name: relancepro-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - relancepro-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  # Redis Commander (Optional - Redis GUI)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: relancepro-redis-gui
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+      - relancepro-network
+    profiles:
+      - tools
+    depends_on:
+      - redis
+
+  # pgAdmin (Optional - PostgreSQL GUI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: relancepro-pgadmin
+    restart: unless-stopped
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@relancepro.africa
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - relancepro-network
+    profiles:
+      - tools
+    depends_on:
+      - postgres
+
+  # Nginx Reverse Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: relancepro-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - relancepro-network
+    depends_on:
+      - app
+    profiles:
+      - production
+
+  # Prometheus (Monitoring - Optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: relancepro-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - relancepro-network
+    profiles:
+      - monitoring
+
+  # Grafana (Monitoring Dashboard - Optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: relancepro-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - relancepro-network
+    profiles:
+      - monitoring
+
+# Networks
+networks:
+  relancepro-network:
+    driver: bridge
+    name: relancepro-network
+
+# Volumes
+volumes:
+  postgres-data:
+    driver: local
+    name: relancepro-postgres-data
+  redis-data:
+    driver: local
+    name: relancepro-redis-data
+  pgadmin-data:
+    driver: local
+    name: relancepro-pgadmin-data
+  prometheus-data:
+    driver: local
+    name: relancepro-prometheus-data
+  grafana-data:
+    driver: local
+    name: relancepro-grafana-data

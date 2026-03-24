@@ -6,8 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { NotificationProvider } from "@/components/notifications/notification-context";
-import { InstallPrompt } from "@/components/pwa/install-prompt";
-import { OfflineIndicator, UpdateAvailableBanner } from "@/components/pwa/offline-indicator";
+import { PWAInstallPrompt, OfflineIndicator, UpdateAvailableBanner } from "@/components/pwa/pwa-install-prompt";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -35,14 +34,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <NotificationProvider>
               {children}
               {/* PWA Components */}
-              <InstallPrompt 
-                delay={5000}
-                autoShow={true}
-              />
-              <OfflineIndicator 
-                position="top"
-                showSyncStatus={true}
-              />
+              <PWAInstallPrompt />
+              <OfflineIndicator />
               <UpdateAvailableBanner />
             </NotificationProvider>
           </LanguageProvider>

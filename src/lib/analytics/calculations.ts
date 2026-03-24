@@ -1,430 +1,416 @@
-/**
- * Analytics Calculations Utility
- * Provides functions for calculating various analytics metrics
- */
+// Analytics calculation utilities for RelancePro Africa
+import { differenceInDays, differenceInMonths, format, startOfMonth, endOfMonth, subMonths, isAfter, isBefore, isEqual, startOfDay, endOfDay } from "date-fns";
 
 // Types
-interface DebtData {
+export interface Debt {
   id: string;
   amount: number;
   paidAmount: number;
   status: string;
   dueDate: Date | string;
+  issueDate?: Date | string | null;
   paidDate?: Date | string | null;
   createdAt: Date | string;
+  currency: string;
   paymentProbability?: number | null;
   predictedPayDate?: Date | string | null;
+  reminderCount: number;
 }
 
-interface ReminderData {
-  id: string;
-  type: string;
-  status: string;
-  responseReceived: boolean;
-  sentAt?: Date | string | null;
-  deliveredAt?: Date | string | null;
-  createdAt: Date | string;
+export interface AgingBucket {
+  range: string;
+  label: string;
+  count: number;
+  amount: number;
+  percentage: number;
+  color: string;
 }
 
-interface ClientData {
-  id: string;
-  riskLevel?: string | null;
-  riskScore?: number | null;
-  debts: Array<{
-    amount: number;
-    paidAmount: number;
-    status: string;
-  }>;
-}
-
-interface PaymentPrediction {
+export interface MonthlyTrend {
   month: string;
-  predicted: number;
-  confidence: number;
+  total: number;
+  recovered: number;
+  pending: number;
+  rate: number;
+}
+
+export interface RiskDistribution {
+  level: string;
+  label: string;
+  count: number;
+  amount: number;
+  color: string;
 }
 
 /**
- * Calculate recovery rate - percentage of recovered amount
+ * Calculate recovery rate from debts
  */
-export function calculateRecoveryRate(debts: DebtData[]): number {
+export function calculateRecoveryRate(debts: Debt[]): number {
   if (!debts || debts.length === 0) return 0;
   
-  const totalAmount = debts.reduce((sum, debt) => sum + debt.amount, 0);
+  const totalAmount = debts.reduce((sum, d) => sum + d.amount, 0);
+  const paidAmount = debts.reduce((sum, d) => sum + d.paidAmount, 0);
+  
   if (totalAmount === 0) return 0;
-  
-  const paidAmount = debts.reduce((sum, debt) => sum + debt.paidAmount, 0);
-  
   return Math.round((paidAmount / totalAmount) * 100);
 }
 
 /**
  * Calculate average payment time in days
  */
-export function calculateAveragePaymentTime(debts: DebtData[]): number {
-  const paidDebts = debts.filter(
-    (debt) => debt.status === "paid" && debt.paidDate && debt.dueDate
+export function calculateAveragePaymentTime(debts: Debt[]): number {
+  const paidDebts = debts.filter(d => 
+    d.status === "paid" && d.paidDate
   );
   
   if (paidDebts.length === 0) return 0;
   
   const totalDays = paidDebts.reduce((sum, debt) => {
+    const issueDate = debt.issueDate 
+      ? new Date(debt.issueDate) 
+      : new Date(debt.createdAt);
     const paidDate = new Date(debt.paidDate!);
-    const dueDate = new Date(debt.dueDate);
-    const diffDays = Math.floor(
-      (paidDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    return sum + diffDays;
+    return sum + differenceInDays(paidDate, issueDate);
   }, 0);
   
   return Math.round(totalDays / paidDebts.length);
 }
 
 /**
- * Calculate reminder success rate - percentage of successful reminders
- * A reminder is considered successful if it was delivered AND got a response
+ * Calculate aging buckets for overdue debts
  */
-export function calculateReminderSuccessRate(reminders: ReminderData[]): number {
-  if (!reminders || reminders.length === 0) return 0;
-  
-  const successfulReminders = reminders.filter(
-    (reminder) =>
-      (reminder.status === "delivered" || reminder.status === "opened") &&
-      reminder.responseReceived
-  );
-  
-  return Math.round((successfulReminders.length / reminders.length) * 100);
-}
-
-/**
- * Calculate delivery rate for reminders
- */
-export function calculateDeliveryRate(reminders: ReminderData[]): number {
-  if (!reminders || reminders.length === 0) return 0;
-  
-  const deliveredReminders = reminders.filter(
-    (reminder) =>
-      reminder.status === "delivered" ||
-      reminder.status === "opened" ||
-      reminder.deliveredAt !== null
-  );
-  
-  return Math.round((deliveredReminders.length / reminders.length) * 100);
-}
-
-/**
- * Predict monthly revenue based on payment probabilities and due dates
- */
-export function predictMonthlyRevenue(debts: DebtData[]): PaymentPrediction[] {
+export function calculateAgingBuckets(debts: Debt[]): AgingBucket[] {
   const now = new Date();
-  const predictions: PaymentPrediction[] = [];
   
-  // Filter pending debts with payment predictions
-  const pendingDebts = debts.filter(
-    (debt) =>
-      debt.status !== "paid" &&
-      debt.status !== "cancelled" &&
-      debt.paymentProbability !== null &&
-      debt.paymentProbability > 0
+  const buckets: AgingBucket[] = [
+    { range: "0-7", label: "0-7 jours", count: 0, amount: 0, percentage: 0, color: "#22c55e" },
+    { range: "8-14", label: "8-14 jours", count: 0, amount: 0, percentage: 0, color: "#84cc16" },
+    { range: "15-30", label: "15-30 jours", count: 0, amount: 0, percentage: 0, color: "#f59e0b" },
+    { range: "31-60", label: "31-60 jours", count: 0, amount: 0, percentage: 0, color: "#f97316" },
+    { range: "60+", label: "Plus de 60 jours", count: 0, amount: 0, percentage: 0, color: "#ef4444" },
+  ];
+  
+  const activeDebts = debts.filter(d => 
+    d.status !== "paid" && d.status !== "cancelled"
   );
   
-  // Group by month for next 6 months
-  for (let i = 0; i < 6; i++) {
-    const monthDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    const monthKey = monthDate.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
+  const totalAmount = activeDebts.reduce((sum, d) => sum + (d.amount - d.paidAmount), 0);
+  
+  activeDebts.forEach(debt => {
+    const dueDate = new Date(debt.dueDate);
+    const daysOverdue = differenceInDays(now, dueDate);
     
-    let predictedAmount = 0;
-    let totalProbability = 0;
-    let count = 0;
+    if (daysOverdue <= 0) return; // Not overdue yet
     
-    pendingDebts.forEach((debt) => {
-      const dueDate = new Date(debt.dueDate);
-      const predictedDate = debt.predictedPayDate ? new Date(debt.predictedPayDate) : null;
-      
-      // Check if debt is predicted/expected to be paid in this month
-      const expectedPayMonth = predictedDate || dueDate;
-      const expectedMonth = `${expectedPayMonth.getFullYear()}-${String(expectedPayMonth.getMonth() + 1).padStart(2, "0")}`;
-      const currentMonth = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
-      
-      if (expectedMonth === currentMonth) {
-        const remainingAmount = debt.amount - debt.paidAmount;
-        const probability = (debt.paymentProbability || 0) / 100;
-        predictedAmount += remainingAmount * probability;
-        totalProbability += probability;
-        count++;
-      }
+    const remainingAmount = debt.amount - debt.paidAmount;
+    
+    if (daysOverdue <= 7) {
+      buckets[0].count++;
+      buckets[0].amount += remainingAmount;
+    } else if (daysOverdue <= 14) {
+      buckets[1].count++;
+      buckets[1].amount += remainingAmount;
+    } else if (daysOverdue <= 30) {
+      buckets[2].count++;
+      buckets[2].amount += remainingAmount;
+    } else if (daysOverdue <= 60) {
+      buckets[3].count++;
+      buckets[3].amount += remainingAmount;
+    } else {
+      buckets[4].count++;
+      buckets[4].amount += remainingAmount;
+    }
+  });
+  
+  // Calculate percentages
+  buckets.forEach(bucket => {
+    bucket.percentage = totalAmount > 0 
+      ? Math.round((bucket.amount / totalAmount) * 100) 
+      : 0;
+  });
+  
+  return buckets;
+}
+
+/**
+ * Calculate monthly trend data
+ */
+export function calculateMonthlyTrend(debts: Debt[], months: number = 12): MonthlyTrend[] {
+  const now = new Date();
+  const trends: MonthlyTrend[] = [];
+  
+  for (let i = months - 1; i >= 0; i--) {
+    const monthDate = subMonths(now, i);
+    const monthStart = startOfMonth(monthDate);
+    const monthEnd = endOfMonth(monthDate);
+    
+    const monthDebts = debts.filter(d => {
+      const createdAt = new Date(d.createdAt);
+      return (createdAt >= monthStart && createdAt <= monthEnd);
     });
     
-    predictions.push({
-      month: monthKey,
-      predicted: Math.round(predictedAmount),
-      confidence: count > 0 ? Math.round((totalProbability / count) * 100) : 0,
+    const total = monthDebts.reduce((sum, d) => sum + d.amount, 0);
+    const recovered = monthDebts
+      .filter(d => d.paidDate && (() => {
+        const paidDate = new Date(d.paidDate!);
+        return paidDate >= monthStart && paidDate <= monthEnd;
+      })())
+      .reduce((sum, d) => sum + d.paidAmount, 0);
+    const pending = total - recovered;
+    const rate = total > 0 ? Math.round((recovered / total) * 100) : 0;
+    
+    trends.push({
+      month: format(monthDate, "MMM yy"),
+      total,
+      recovered,
+      pending,
+      rate,
     });
   }
   
-  return predictions;
+  return trends;
 }
 
 /**
  * Calculate client risk distribution
  */
-export function calculateClientRiskDistribution(clients: ClientData[]): {
-  level: string;
-  count: number;
-  amount: number;
-  percentage: number;
-}[] {
-  if (!clients || clients.length === 0) return [];
+export function calculateRiskDistribution(
+  clients: Array<{ riskLevel?: string | null; id: string }>,
+  debts: Debt[]
+): RiskDistribution[] {
+  const distributions: RiskDistribution[] = [
+    { level: "high", label: "Risque élevé", count: 0, amount: 0, color: "#ef4444" },
+    { level: "medium", label: "Risque moyen", count: 0, amount: 0, color: "#f59e0b" },
+    { level: "low", label: "Risque faible", count: 0, amount: 0, color: "#22c55e" },
+    { level: "unknown", label: "Non évalué", count: 0, amount: 0, color: "#6b7280" },
+  ];
   
-  const riskGroups: Record<string, { count: number; amount: number }> = {
-    low: { count: 0, amount: 0 },
-    medium: { count: 0, amount: 0 },
-    high: { count: 0, amount: 0 },
-    undefined: { count: 0, amount: 0 },
-  };
-  
-  clients.forEach((client) => {
-    const totalDebt = client.debts
-      .filter((d) => d.status !== "paid" && d.status !== "cancelled")
-      .reduce((sum, d) => sum + (d.amount - d.paidAmount), 0);
-    
-    const level = client.riskLevel || "undefined";
-    riskGroups[level].count++;
-    riskGroups[level].amount += totalDebt;
+  // Map client risk levels
+  const clientRiskMap = new Map<string, string>();
+  clients.forEach(client => {
+    clientRiskMap.set(client.id, client.riskLevel || "unknown");
   });
   
-  const totalClients = clients.length;
+  debts.forEach(debt => {
+    const clientId = (debt as Debt & { clientId?: string }).clientId;
+    if (!clientId) return;
+    
+    const riskLevel = clientRiskMap.get(clientId) || "unknown";
+    const remainingAmount = debt.amount - debt.paidAmount;
+    
+    const dist = distributions.find(d => d.level === riskLevel);
+    if (dist) {
+      dist.count++;
+      dist.amount += remainingAmount;
+    }
+  });
   
-  const labels: Record<string, string> = {
-    low: "Faible",
-    medium: "Moyen",
-    high: "Élevé",
-    undefined: "Non évalué",
-  };
+  return distributions.filter(d => d.count > 0);
+}
+
+/**
+ * Calculate revenue data grouped by period
+ */
+export function calculateRevenueByPeriod(
+  debts: Debt[],
+  groupBy: "day" | "week" | "month" = "month",
+  startDate: Date,
+  endDate: Date
+): Array<{ period: string; revenue: number; count: number }> {
+  const revenueMap = new Map<string, { revenue: number; count: number }>();
   
-  return Object.entries(riskGroups)
-    .filter(([, data]) => data.count > 0)
-    .map(([level, data]) => ({
-      level: labels[level],
-      count: data.count,
-      amount: data.amount,
-      percentage: totalClients > 0 ? Math.round((data.count / totalClients) * 100) : 0,
-    }));
+  // Filter paid debts within date range
+  const paidDebts = debts.filter(d => {
+    if (d.status !== "paid" || !d.paidDate) return false;
+    const paidDate = new Date(d.paidDate);
+    return paidDate >= startDate && paidDate <= endDate;
+  });
+  
+  paidDebts.forEach(debt => {
+    const paidDate = new Date(debt.paidDate!);
+    let periodKey: string;
+    
+    switch (groupBy) {
+      case "day":
+        periodKey = format(paidDate, "dd MMM yyyy");
+        break;
+      case "week":
+        periodKey = `Semaine du ${format(paidDate, "dd MMM")}`;
+        break;
+      case "month":
+      default:
+        periodKey = format(paidDate, "MMM yyyy");
+        break;
+    }
+    
+    const existing = revenueMap.get(periodKey) || { revenue: 0, count: 0 };
+    existing.revenue += debt.paidAmount;
+    existing.count++;
+    revenueMap.set(periodKey, existing);
+  });
+  
+  return Array.from(revenueMap.entries())
+    .map(([period, data]) => ({ period, ...data }))
+    .sort((a, b) => a.period.localeCompare(b.period));
 }
 
 /**
  * Calculate debt status distribution
  */
-export function calculateDebtStatusDistribution(debts: DebtData[]): {
+export function calculateDebtStatusDistribution(debts: Debt[]): Array<{
   status: string;
+  label: string;
   count: number;
   amount: number;
-  percentage: number;
-}[] {
-  if (!debts || debts.length === 0) return [];
+  color: string;
+}> {
+  const statuses = [
+    { status: "pending", label: "En attente", count: 0, amount: 0, color: "#f59e0b" },
+    { status: "paid", label: "Payées", count: 0, amount: 0, color: "#22c55e" },
+    { status: "partial", label: "Partielles", count: 0, amount: 0, color: "#3b82f6" },
+    { status: "disputed", label: "Contestées", count: 0, amount: 0, color: "#f97316" },
+    { status: "cancelled", label: "Annulées", count: 0, amount: 0, color: "#6b7280" },
+  ];
   
-  const statusGroups: Record<string, { count: number; amount: number }> = {
-    pending: { count: 0, amount: 0 },
-    paid: { count: 0, amount: 0 },
-    partial: { count: 0, amount: 0 },
-    disputed: { count: 0, amount: 0 },
-    cancelled: { count: 0, amount: 0 },
-  };
-  
-  debts.forEach((debt) => {
-    const status = debt.status || "pending";
-    if (statusGroups[status]) {
-      statusGroups[status].count++;
-      statusGroups[status].amount += debt.amount;
+  debts.forEach(debt => {
+    const status = statuses.find(s => s.status === debt.status);
+    if (status) {
+      status.count++;
+      status.amount += debt.amount - debt.paidAmount;
     }
   });
   
-  const totalDebts = debts.length;
+  return statuses.filter(s => s.count > 0);
+}
+
+/**
+ * Calculate reminder statistics
+ */
+export function calculateReminderStats(
+  reminders: Array<{
+    type: string;
+    status: string;
+    responseReceived?: boolean;
+    sentAt?: Date | string | null;
+    createdAt: Date | string;
+  }>
+): {
+  byType: Array<{ type: string; count: number; successRate: number }>;
+  byStatus: Array<{ status: string; count: number }>;
+  overallSuccessRate: number;
+  responseRate: number;
+} {
+  const typeMap = new Map<string, { sent: number; success: number }>();
+  const statusMap = new Map<string, number>();
+  let totalSent = 0;
+  let totalSuccess = 0;
+  let totalResponses = 0;
   
-  const labels: Record<string, string> = {
-    pending: "En attente",
-    paid: "Payée",
-    partial: "Partiel",
-    disputed: "Contestée",
-    cancelled: "Annulée",
+  reminders.forEach(reminder => {
+    // By type
+    const type = reminder.type || "email";
+    const typeData = typeMap.get(type) || { sent: 0, success: 0 };
+    typeData.sent++;
+    if (reminder.status === "sent" || reminder.status === "delivered") {
+      typeData.success++;
+    }
+    typeMap.set(type, typeData);
+    
+    // By status
+    const statusCount = statusMap.get(reminder.status) || 0;
+    statusMap.set(reminder.status, statusCount + 1);
+    
+    // Totals
+    totalSent++;
+    if (reminder.status === "sent" || reminder.status === "delivered") {
+      totalSuccess++;
+    }
+    if (reminder.responseReceived) {
+      totalResponses++;
+    }
+  });
+  
+  const byType = Array.from(typeMap.entries()).map(([type, data]) => ({
+    type,
+    count: data.sent,
+    successRate: data.sent > 0 ? Math.round((data.success / data.sent) * 100) : 0,
+  }));
+  
+  const byStatus = Array.from(statusMap.entries()).map(([status, count]) => ({
+    status,
+    count,
+  }));
+  
+  return {
+    byType,
+    byStatus,
+    overallSuccessRate: totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 0,
+    responseRate: totalSent > 0 ? Math.round((totalResponses / totalSent) * 100) : 0,
   };
-  
-  return Object.entries(statusGroups)
-    .filter(([, data]) => data.count > 0)
-    .map(([status, data]) => ({
-      status: labels[status] || status,
-      count: data.count,
-      amount: data.amount,
-      percentage: totalDebts > 0 ? Math.round((data.count / totalDebts) * 100) : 0,
-    }));
 }
 
 /**
- * Calculate revenue by month
+ * Format currency for display (GNF default)
  */
-export function calculateRevenueByMonth(
-  debts: DebtData[],
-  months: number = 12
-): { month: string; revenue: number; predicted?: number }[] {
-  const now = new Date();
-  const result: { month: string; revenue: number; predicted?: number }[] = [];
-  
-  for (let i = months - 1; i >= 0; i--) {
-    const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const monthKey = monthDate.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
-    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-    const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
-    
-    let revenue = 0;
-    
-    debts.forEach((debt) => {
-      if (debt.paidDate) {
-        const paidDate = new Date(debt.paidDate);
-        if (paidDate >= monthStart && paidDate <= monthEnd) {
-          revenue += debt.paidAmount;
-        }
-      }
-    });
-    
-    result.push({
-      month: monthKey,
-      revenue,
-    });
+export function formatCurrency(amount: number, currency: string = "GNF"): string {
+  if (currency === "GNF") {
+    if (amount >= 1000000000) {
+      return `${(amount / 1000000000).toFixed(1)} Md GNF`;
+    }
+    if (amount >= 1000000) {
+      return `${(amount / 1000000).toFixed(1)} M GNF`;
+    }
+    if (amount >= 1000) {
+      return `${(amount / 1000).toFixed(0)} K GNF`;
+    }
+    return new Intl.NumberFormat("fr-GN", {
+      style: "decimal",
+      maximumFractionDigits: 0,
+    }).format(amount) + " GNF";
   }
   
-  return result;
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: currency,
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
 /**
- * Calculate payment trend (daily/weekly)
+ * Calculate percentage change
  */
-export function calculatePaymentTrend(
-  debts: DebtData[],
-  days: number = 30
-): { date: string; amount: number; count: number }[] {
-  const now = new Date();
-  const result: { date: string; amount: number; count: number }[] = [];
-  
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-    const dateKey = date.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
-    const dayStart = new Date(date.setHours(0, 0, 0, 0));
-    const dayEnd = new Date(date.setHours(23, 59, 59, 999));
-    
-    let dailyAmount = 0;
-    let dailyCount = 0;
-    
-    debts.forEach((debt) => {
-      if (debt.paidDate && debt.status === "paid") {
-        const paidDate = new Date(debt.paidDate);
-        if (paidDate >= dayStart && paidDate <= dayEnd) {
-          dailyAmount += debt.paidAmount;
-          dailyCount++;
-        }
-      }
-    });
-    
-    result.push({
-      date: dateKey,
-      amount: dailyAmount,
-      count: dailyCount,
-    });
+export function calculatePercentageChange(current: number, previous: number): {
+  value: number;
+  direction: "up" | "down" | "neutral";
+} {
+  if (previous === 0) {
+    return { value: 0, direction: "neutral" };
   }
   
-  return result;
+  const change = ((current - previous) / previous) * 100;
+  
+  return {
+    value: Math.abs(Math.round(change)),
+    direction: change > 0 ? "up" : change < 0 ? "down" : "neutral",
+  };
 }
 
 /**
- * Calculate reminder trend over time
+ * Calculate days until due or days overdue
  */
-export function calculateReminderTrend(
-  reminders: ReminderData[],
-  months: number = 6
-): { month: string; sent: number; successful: number; rate: number }[] {
+export function calculateDaysStatus(dueDate: Date | string): {
+  days: number;
+  status: "overdue" | "due-soon" | "normal";
+} {
   const now = new Date();
-  const result: { month: string; sent: number; successful: number; rate: number }[] = [];
+  const due = new Date(dueDate);
+  const diffDays = differenceInDays(due, now);
   
-  for (let i = months - 1; i >= 0; i--) {
-    const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const monthKey = monthDate.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
-    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-    const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59);
-    
-    let sent = 0;
-    let successful = 0;
-    
-    reminders.forEach((reminder) => {
-      const createdAt = new Date(reminder.createdAt);
-      if (createdAt >= monthStart && createdAt <= monthEnd) {
-        sent++;
-        if (reminder.responseReceived) {
-          successful++;
-        }
-      }
-    });
-    
-    result.push({
-      month: monthKey,
-      sent,
-      successful,
-      rate: sent > 0 ? Math.round((successful / sent) * 100) : 0,
-    });
+  if (diffDays < 0) {
+    return { days: Math.abs(diffDays), status: "overdue" };
   }
-  
-  return result;
-}
-
-/**
- * Calculate overdue amount
- */
-export function calculateOverdueAmount(debts: DebtData[]): number {
-  const now = new Date();
-  
-  return debts
-    .filter((debt) => {
-      if (debt.status === "paid" || debt.status === "cancelled") return false;
-      return new Date(debt.dueDate) < now;
-    })
-    .reduce((sum, debt) => sum + (debt.amount - debt.paidAmount), 0);
-}
-
-/**
- * Calculate total pending amount
- */
-export function calculatePendingAmount(debts: DebtData[]): number {
-  return debts
-    .filter((debt) => debt.status !== "paid" && debt.status !== "cancelled")
-    .reduce((sum, debt) => sum + (debt.amount - debt.paidAmount), 0);
-}
-
-/**
- * Calculate average debt age in days
- */
-export function calculateAverageDebtAge(debts: DebtData[]): number {
-  const now = new Date();
-  const activeDebts = debts.filter(
-    (debt) => debt.status !== "paid" && debt.status !== "cancelled"
-  );
-  
-  if (activeDebts.length === 0) return 0;
-  
-  const totalAge = activeDebts.reduce((sum, debt) => {
-    const createdAt = new Date(debt.createdAt);
-    const age = Math.floor(
-      (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    return sum + age;
-  }, 0);
-  
-  return Math.round(totalAge / activeDebts.length);
-}
-
-/**
- * Calculate sparkline data for KPI cards
- */
-export function calculateSparklineData(
-  data: { date: string; amount: number }[],
-  maxPoints: number = 7
-): { value: number }[] {
-  const points = data.slice(-maxPoints);
-  return points.map((p) => ({ value: p.amount }));
+  if (diffDays <= 7) {
+    return { days: diffDays, status: "due-soon" };
+  }
+  return { days: diffDays, status: "normal" };
 }

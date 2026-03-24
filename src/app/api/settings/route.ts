@@ -56,10 +56,6 @@ export async function PUT(request: NextRequest) {
       reminderDay1,
       reminderDay2,
       reminderDay3,
-      skipWeekends,
-      reminderStartTime,
-      reminderEndTime,
-      maxReminders,
     } = body;
 
     // Mettre à jour le profil
@@ -83,10 +79,6 @@ export async function PUT(request: NextRequest) {
         reminderDay1,
         reminderDay2,
         reminderDay3,
-        skipWeekends,
-        reminderStartTime,
-        reminderEndTime,
-        maxReminders,
       },
       create: {
         profileId: session.user.id,
@@ -97,10 +89,6 @@ export async function PUT(request: NextRequest) {
         reminderDay1,
         reminderDay2,
         reminderDay3,
-        skipWeekends,
-        reminderStartTime,
-        reminderEndTime,
-        maxReminders,
       },
     });
 

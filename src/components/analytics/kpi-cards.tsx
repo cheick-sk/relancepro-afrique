@@ -1,90 +1,51 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Receipt,
   TrendingUp,
+  TrendingDown,
+  Minus,
+  Receipt,
+  Banknote,
   Percent,
   Users,
+  Mail,
   Clock,
-  CalendarDays,
-  ArrowUpRight,
-  ArrowDownRight,
-  Wallet,
-  AlertTriangle,
-  UserCheck,
-  Timer,
+  type LucideIcon,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { formatCurrency } from "@/lib/analytics/calculations";
 
-interface KPIStats {
-  totalDebts: number;
-  totalAmount: number;
-  paidAmount: number;
-  pendingAmount: number;
-  overdueAmount: number;
-  clientCount: number;
-  activeClientsCount: number;
-  overdueDebtsCount: number;
-  reminderCount: number;
-  recoveryRate: number;
-  avgPaymentProbability: number;
-  avgDaysToPayment: number;
+export interface KPICardData {
+  id: string;
+  title: string;
+  value: string;
+  trend?: number;
+  trendDirection?: "up" | "down" | "neutral";
+  trendLabel?: string;
+  icon: LucideIcon;
+  color: string;
+  bgColor: string;
+  sparkline?: number[];
 }
 
 interface KPICardsProps {
-  stats: KPIStats;
+  data: KPICardData[];
   loading?: boolean;
-  previousStats?: {
-    totalAmount?: number;
-    paidAmount?: number;
-    recoveryRate?: number;
-  };
-  currency?: string;
-  locale?: string;
+  onCardClick?: (kpi: KPICardData) => void;
 }
 
-function formatCurrency(value: number, currency: string = "GNF"): string {
-  if (value >= 1000000000) {
-    return `${(value / 1000000000).toFixed(1)}Md ${currency}`;
-  }
-  if (value >= 1000000) {
-    return `${(value / 1000000).toFixed(1)}M ${currency}`;
-  }
-  if (value >= 1000) {
-    return `${(value / 1000).toFixed(0)}K ${currency}`;
-  }
-  return `${value.toLocaleString("fr-FR")} ${currency}`;
-}
-
-function calculateChange(
-  current: number,
-  previous?: number
-): { value: number; isPositive: boolean } | null {
-  if (previous === undefined || previous === 0) return null;
-  const change = ((current - previous) / previous) * 100;
-  return {
-    value: Math.abs(Math.round(change)),
-    isPositive: change >= 0,
-  };
-}
-
-export function KPICards({
-  stats,
-  loading,
-  previousStats,
-  currency = "GNF",
-}: KPICardsProps) {
+export function KPICards({ data, loading = false, onCardClick }: KPICardsProps) {
   if (loading) {
     return (
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Card key={i} className="animate-pulse">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <Card key={i} className="overflow-hidden">
             <CardContent className="p-4">
-              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2 mb-3" />
-              <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-2" />
-              <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
+              <Skeleton className="h-4 w-20 mb-2" />
+              <Skeleton className="h-8 w-24 mb-1" />
+              <Skeleton className="h-3 w-16" />
             </CardContent>
           </Card>
         ))}
@@ -92,165 +53,213 @@ export function KPICards({
     );
   }
 
-  const kpis = [
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      {data.map((kpi) => (
+        <KPICard key={kpi.id} kpi={kpi} onClick={() => onCardClick?.(kpi)} />
+      ))}
+    </div>
+  );
+}
+
+interface KPICardProps {
+  kpi: KPICardData;
+  onClick?: () => void;
+}
+
+export function KPICard({ kpi, onClick }: KPICardProps) {
+  const {
+    title,
+    value,
+    trend,
+    trendDirection = "neutral",
+    trendLabel,
+    icon: Icon,
+    color,
+    bgColor,
+  } = kpi;
+
+  const trendColor =
+    trendDirection === "up"
+      ? "text-green-600 dark:text-green-400"
+      : trendDirection === "down"
+      ? "text-red-600 dark:text-red-400"
+      : "text-gray-500 dark:text-gray-400";
+
+  const TrendIcon =
+    trendDirection === "up"
+      ? TrendingUp
+      : trendDirection === "down"
+      ? TrendingDown
+      : Minus;
+
+  return (
+    <Card
+      className={cn(
+        "transition-all hover:shadow-md",
+        onClick && "cursor-pointer hover:border-orange-300 dark:hover:border-orange-700"
+      )}
+      onClick={onClick}
+    >
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <div className={cn("p-2 rounded-lg", bgColor)}>
+            <Icon className={cn("h-4 w-4", color)} />
+          </div>
+          {trend !== undefined && (
+            <div className={cn("flex items-center gap-0.5 text-xs", trendColor)}>
+              <TrendIcon className="h-3 w-3" />
+              <span className="font-medium">{Math.abs(trend)}%</span>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="text-xl font-bold text-gray-900 dark:text-white truncate">
+            {value}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">
+            {title}
+          </p>
+          {trendLabel && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 truncate">
+              {trendLabel}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Helper function to generate default KPI data from analytics
+export function generateKPIData(analytics: {
+  summary: {
+    totalAmount: number;
+    paidAmount: number;
+    reminderCount: number;
+    previousTotalAmount?: number;
+    previousPaidAmount?: number;
+    previousReminderCount?: number;
+  };
+  kpis: {
+    recoveryRate: number;
+    previousRecoveryRate?: number;
+    avgPaymentDelay: number;
+    totalClients: number;
+    activeClients: number;
+    overdueCount: number;
+  };
+}, currency: string = "GNF"): KPICardData[] {
+  const calculateTrend = (current: number, previous: number | undefined) => {
+    if (!previous || previous === 0) return { value: undefined, direction: "neutral" as const };
+    const change = ((current - previous) / previous) * 100;
+    return {
+      value: Math.abs(Math.round(change)),
+      direction: change > 0 ? "up" as const : change < 0 ? "down" as const : "neutral" as const,
+    };
+  };
+
+  const totalTrend = calculateTrend(analytics.summary.totalAmount, analytics.summary.previousTotalAmount);
+  const paidTrend = calculateTrend(analytics.summary.paidAmount, analytics.summary.previousPaidAmount);
+  const reminderTrend = calculateTrend(analytics.summary.reminderCount, analytics.summary.previousReminderCount);
+  const recoveryTrend = analytics.kpis.previousRecoveryRate
+    ? {
+        value: Math.abs(analytics.kpis.recoveryRate - analytics.kpis.previousRecoveryRate),
+        direction:
+          analytics.kpis.recoveryRate > analytics.kpis.previousRecoveryRate
+            ? "up" as const
+            : analytics.kpis.recoveryRate < analytics.kpis.previousRecoveryRate
+            ? "down" as const
+            : "neutral" as const,
+      }
+    : { value: undefined, direction: "neutral" as const };
+
+  return [
     {
       id: "total-debts",
-      title: "Total Créances",
-      value: formatCurrency(stats.totalAmount, currency),
-      subtitle: `${stats.totalDebts} créance${stats.totalDebts > 1 ? "s" : ""}`,
+      title: "Créances totales",
+      value: formatCurrency(analytics.summary.totalAmount, currency),
+      trend: totalTrend.value,
+      trendDirection: totalTrend.direction,
+      trendLabel: "vs période préc.",
       icon: Receipt,
       color: "text-orange-600",
       bgColor: "bg-orange-100 dark:bg-orange-900/30",
-      change: calculateChange(stats.totalAmount, previousStats?.totalAmount),
-      trend: "up" as const,
     },
     {
-      id: "collected",
-      title: "Montant Récupéré",
-      value: formatCurrency(stats.paidAmount, currency),
-      subtitle: `${stats.recoveryRate}% du total`,
-      icon: Wallet,
+      id: "recovered",
+      title: "Montant récupéré",
+      value: formatCurrency(analytics.summary.paidAmount, currency),
+      trend: paidTrend.value,
+      trendDirection: paidTrend.direction,
+      trendLabel: "vs période préc.",
+      icon: Banknote,
       color: "text-green-600",
       bgColor: "bg-green-100 dark:bg-green-900/30",
-      change: calculateChange(stats.paidAmount, previousStats?.paidAmount),
-      trend: "up" as const,
     },
     {
       id: "recovery-rate",
-      title: "Taux de Recouvrement",
-      value: `${stats.recoveryRate}%`,
-      subtitle: "Objectif: 80%",
-      icon: TrendingUp,
+      title: "Taux de recouvrement",
+      value: `${analytics.kpis.recoveryRate}%`,
+      trend: recoveryTrend.value,
+      trendDirection: recoveryTrend.direction,
+      trendLabel: "points",
+      icon: Percent,
       color: "text-blue-600",
       bgColor: "bg-blue-100 dark:bg-blue-900/30",
-      change: calculateChange(stats.recoveryRate, previousStats?.recoveryRate),
-      progress: stats.recoveryRate,
-      trend: stats.recoveryRate >= 80 ? "up" as const : "neutral" as const,
     },
     {
-      id: "active-clients",
-      title: "Clients Actifs",
-      value: stats.activeClientsCount.toString(),
-      subtitle: `sur ${stats.clientCount} total`,
+      id: "clients",
+      title: "Nombre de clients",
+      value: analytics.kpis.totalClients.toString(),
       icon: Users,
       color: "text-purple-600",
       bgColor: "bg-purple-100 dark:bg-purple-900/30",
-      trend: "neutral" as const,
     },
     {
-      id: "overdue-debts",
-      title: "Créances en Retard",
-      value: stats.overdueDebtsCount.toString(),
-      subtitle: formatCurrency(stats.overdueAmount, currency),
-      icon: AlertTriangle,
-      color: "text-red-600",
-      bgColor: "bg-red-100 dark:bg-red-900/30",
-      isAlert: stats.overdueDebtsCount > 0,
-      trend: stats.overdueDebtsCount > 5 ? "down" as const : "neutral" as const,
+      id: "reminders",
+      title: "Relances envoyées",
+      value: analytics.summary.reminderCount.toString(),
+      trend: reminderTrend.value,
+      trendDirection: reminderTrend.direction,
+      trendLabel: "vs période préc.",
+      icon: Mail,
+      color: "text-pink-600",
+      bgColor: "bg-pink-100 dark:bg-pink-900/30",
     },
     {
-      id: "avg-days",
-      title: "Délai Moyen Paiement",
-      value: `${stats.avgDaysToPayment}j`,
-      subtitle: "jours en moyenne",
-      icon: Timer,
+      id: "avg-payment",
+      title: "Temps moyen paiement",
+      value: `${analytics.kpis.avgPaymentDelay}j`,
+      icon: Clock,
       color: "text-cyan-600",
       bgColor: "bg-cyan-100 dark:bg-cyan-900/30",
-      trend: stats.avgDaysToPayment <= 30 ? "up" as const : stats.avgDaysToPayment <= 60 ? "neutral" as const : "down" as const,
+    },
+    {
+      id: "overdue",
+      title: "Créances en retard",
+      value: analytics.kpis.overdueCount.toString(),
+      icon: TrendingUp,
+      color: "text-red-600",
+      bgColor: "bg-red-100 dark:bg-red-900/30",
     },
   ];
+}
 
+// Skeleton loading component
+export function KPICardsSkeleton() {
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-      {kpis.map((kpi) => (
-        <Card
-          key={kpi.id}
-          className={`relative overflow-hidden transition-all duration-200 hover:shadow-lg hover:scale-[1.02] ${
-            kpi.isAlert ? "border-red-200 dark:border-red-800 animate-pulse" : ""
-          }`}
-        >
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      {Array.from({ length: 7 }).map((_, i) => (
+        <Card key={i} className="overflow-hidden">
           <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className={`p-2 rounded-lg ${kpi.bgColor}`}>
-                <kpi.icon className={`h-5 w-5 ${kpi.color}`} />
-              </div>
-              <div className="flex items-center gap-1">
-                {kpi.change && (
-                  <div
-                    className={`flex items-center text-xs font-medium px-1.5 py-0.5 rounded-full ${
-                      kpi.change.isPositive
-                        ? "text-green-600 bg-green-100 dark:bg-green-900/30"
-                        : "text-red-600 bg-red-100 dark:bg-red-900/30"
-                    }`}
-                  >
-                    {kpi.change.isPositive ? (
-                      <ArrowUpRight className="h-3 w-3" />
-                    ) : (
-                      <ArrowDownRight className="h-3 w-3" />
-                    )}
-                    {kpi.change.value}%
-                  </div>
-                )}
-                {kpi.isAlert && (
-                  <Badge variant="destructive" className="text-xs animate-bounce">
-                    Urgent
-                  </Badge>
-                )}
-              </div>
+            <div className="flex items-start justify-between mb-3">
+              <Skeleton className="h-8 w-8 rounded-lg" />
+              <Skeleton className="h-4 w-10" />
             </div>
-
-            <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white truncate">
-                {kpi.value}
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{kpi.title}</p>
-              {kpi.subtitle && (
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 truncate">
-                  {kpi.subtitle}
-                </p>
-              )}
-            </div>
-
-            {kpi.progress !== undefined && (
-              <div className="mt-3">
-                <Progress
-                  value={kpi.progress}
-                  className={`h-2 ${
-                    kpi.progress >= 80
-                      ? "[&>div]:bg-green-500"
-                      : kpi.progress >= 50
-                      ? "[&>div]:bg-amber-500"
-                      : "[&>div]:bg-red-500"
-                  }`}
-                />
-                <div className="flex justify-between mt-1 text-xs text-gray-400">
-                  <span>0%</span>
-                  <span>100%</span>
-                </div>
-              </div>
-            )}
-
-            {/* Trend indicator */}
-            <div className="mt-2 flex items-center gap-1">
-              {kpi.trend === "up" && (
-                <div className="flex items-center gap-1 text-xs text-green-600">
-                  <TrendingUp className="h-3 w-3" />
-                  <span>Bon</span>
-                </div>
-              )}
-              {kpi.trend === "down" && (
-                <div className="flex items-center gap-1 text-xs text-red-600">
-                  <ArrowDownRight className="h-3 w-3" />
-                  <span>À surveiller</span>
-                </div>
-              )}
-              {kpi.trend === "neutral" && (
-                <div className="flex items-center gap-1 text-xs text-gray-400">
-                  <Percent className="h-3 w-3" />
-                  <span>Normal</span>
-                </div>
-              )}
-            </div>
+            <Skeleton className="h-7 w-24 mb-1" />
+            <Skeleton className="h-3 w-20" />
           </CardContent>
         </Card>
       ))}

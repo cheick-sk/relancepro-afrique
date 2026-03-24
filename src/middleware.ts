@@ -37,6 +37,7 @@ const publicApiRoutes = [
   "/api/auth/2fa/verify",
   "/api/health",
   "/api/paystack/webhook",
+  "/api/team/accept",
 ];
 
 // Helper pour vérifier le rate limit
@@ -234,6 +235,11 @@ export default withAuth(
         // 2FA routes - nécessitent un token partiel (pour la vérification)
         if (pathname.startsWith("/2fa/")) {
           return true; // La vérification se fait dans la page
+        }
+        
+        // Invite acceptance page - public
+        if (pathname.startsWith("/invite/")) {
+          return true;
         }
         
         // Routes protégées - nécessitent un token

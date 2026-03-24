@@ -1,227 +1,270 @@
 "use client";
 
-import {
-  ComposedChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   ChartConfig,
   ChartContainer,
+  ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, DollarSign } from "lucide-react";
+import {
+  Line,
+  LineChart,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  Legend,
+  Area,
+  AreaChart,
+  ComposedChart,
+  Bar,
+} from "recharts";
+import { formatCurrency } from "@/lib/analytics/calculations";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useState } from "react";
+import { CalendarDays, TrendingUp } from "lucide-react";
 
-interface RevenueData {
-  month: string;
+export interface RevenueData {
+  period: string;
   revenue: number;
-  predicted?: number;
+  previousRevenue?: number;
+  count?: number;
 }
 
 interface RevenueChartProps {
   data: RevenueData[];
+  title?: string;
+  description?: string;
   loading?: boolean;
+  groupBy?: "day" | "week" | "month";
+  onGroupByChange?: (groupBy: "day" | "week" | "month") => void;
+  showComparison?: boolean;
   currency?: string;
-  showPrediction?: boolean;
 }
 
 const chartConfig = {
   revenue: {
     label: "Revenus",
-    color: "hsl(24, 95%, 53%)", // Orange
+    color: "#f59e0b",
   },
-  predicted: {
-    label: "Prévision",
-    color: "hsl(142, 76%, 36%)", // Green
+  previousRevenue: {
+    label: "Période précédente",
+    color: "#94a3b8",
   },
 } satisfies ChartConfig;
 
 export function RevenueChart({
   data,
-  loading,
+  title = "Évolution des revenus",
+  description = "Revenus au fil du temps",
+  loading = false,
+  groupBy = "month",
+  onGroupByChange,
+  showComparison = true,
   currency = "GNF",
-  showPrediction = true,
 }: RevenueChartProps) {
-  const [chartType, setChartType] = useState<"bar" | "line">("bar");
-
   if (loading) {
     return (
-      <Card>
+      <Card className="h-full">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5 text-orange-500" />
-            Revenus Mensuels
-          </CardTitle>
-          <CardDescription>Évolution des revenus</CardDescription>
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-4 w-32" />
         </CardHeader>
         <CardContent>
-          <div className="h-[350px] flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
-          </div>
+          <Skeleton className="h-[300px] w-full" />
         </CardContent>
       </Card>
     );
   }
 
-  const totalRevenue = data.reduce((sum, item) => sum + item.revenue, 0);
-  const totalPredicted = data.reduce((sum, item) => sum + (item.predicted || 0), 0);
-
-  const formatCurrency = (value: number) => {
-    if (value >= 1000000) {
-      return `${(value / 1000000).toFixed(1)}M ${currency}`;
-    } else if (value >= 1000) {
-      return `${(value / 1000).toFixed(0)}k ${currency}`;
-    }
-    return `${value} ${currency}`;
-  };
-
   return (
-    <Card>
-      <CardHeader>
+    <Card className="h-full">
+      <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5 text-orange-500" />
-              Revenus Mensuels
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-orange-500" />
+              {title}
             </CardTitle>
-            <CardDescription>Évolution des revenus sur la période</CardDescription>
+            <CardDescription>{description}</CardDescription>
           </div>
-          <ToggleGroup
-            type="single"
-            value={chartType}
-            onValueChange={(value) => value && setChartType(value as "bar" | "line")}
-            className="border rounded-lg p-1"
-          >
-            <ToggleGroupItem value="bar" className="text-xs px-3">
-              Barres
-            </ToggleGroupItem>
-            <ToggleGroupItem value="line" className="text-xs px-3">
-              Ligne
-            </ToggleGroupItem>
-          </ToggleGroup>
+          {onGroupByChange && (
+            <ToggleGroup
+              type="single"
+              value={groupBy}
+              onValueChange={(value) => value && onGroupByChange(value as "day" | "week" | "month")}
+              size="sm"
+              className="border rounded-lg"
+            >
+              <ToggleGroupItem value="day" className="text-xs px-3">
+                Jour
+              </ToggleGroupItem>
+              <ToggleGroupItem value="week" className="text-xs px-3">
+                Semaine
+              </ToggleGroupItem>
+              <ToggleGroupItem value="month" className="text-xs px-3">
+                Mois
+              </ToggleGroupItem>
+            </ToggleGroup>
+          )}
         </div>
       </CardHeader>
       <CardContent>
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp className="h-4 w-4 text-orange-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-400">Total Revenus</span>
-            </div>
-            <p className="text-2xl font-bold text-orange-600">
-              {formatCurrency(totalRevenue)}
-            </p>
+        <ChartContainer config={chartConfig} className="h-[300px] w-full">
+          <ComposedChart data={data} margin={{ top: 10, right: 30, left: 10, bottom: 5 }}>
+            <defs>
+              <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
+            <XAxis
+              dataKey="period"
+              tickLine={false}
+              axisLine={false}
+              tickMargin={8}
+              className="text-xs"
+              tick={{ fill: "currentColor", opacity: 0.7 }}
+            />
+            <YAxis
+              tickFormatter={(value) => {
+                if (value >= 1000000) return `${(value / 1000000).toFixed(0)}M`;
+                if (value >= 1000) return `${(value / 1000).toFixed(0)}K`;
+                return value;
+              }}
+              tickLine={false}
+              axisLine={false}
+              tickMargin={8}
+              className="text-xs"
+              tick={{ fill: "currentColor", opacity: 0.7 }}
+            />
+            <ChartTooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+
+                return (
+                  <div className="rounded-lg border bg-background p-3 shadow-md">
+                    <p className="font-medium text-sm mb-2 text-muted-foreground">{label}</p>
+                    {payload.map((entry, index) => (
+                      <div key={index} className="flex items-center gap-2 text-sm">
+                        <div
+                          className="h-3 w-3 rounded-full"
+                          style={{ backgroundColor: entry.color }}
+                        />
+                        <span className="text-muted-foreground">
+                          {entry.name === "revenue" ? "Revenus actuels" : "Période précédente"}:
+                        </span>
+                        <span className="font-semibold">
+                          {formatCurrency(entry.value as number, currency)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }}
+            />
+            <Area
+              type="monotone"
+              dataKey="revenue"
+              stroke="#f59e0b"
+              strokeWidth={2}
+              fill="url(#colorRevenue)"
+              name="revenue"
+            />
+            {showComparison && data.some(d => d.previousRevenue !== undefined) && (
+              <Line
+                type="monotone"
+                dataKey="previousRevenue"
+                stroke="#94a3b8"
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                dot={false}
+                name="previousRevenue"
+              />
+            )}
+          </ComposedChart>
+        </ChartContainer>
+        <div className="flex items-center justify-center gap-6 mt-4 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <div className="h-0.5 w-4 bg-orange-500" />
+            <span>Période actuelle</span>
           </div>
-          {showPrediction && totalPredicted > 0 && (
-            <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <TrendingUp className="h-4 w-4 text-green-500" />
-                <span className="text-sm text-gray-600 dark:text-gray-400">Prévisionnel</span>
-              </div>
-              <p className="text-2xl font-bold text-green-600">
-                {formatCurrency(totalPredicted)}
-              </p>
+          {showComparison && data.some(d => d.previousRevenue !== undefined) && (
+            <div className="flex items-center gap-2">
+              <div className="h-0.5 w-4 bg-slate-400 border-dashed border-t-2 border-slate-400" />
+              <span>Période précédente</span>
             </div>
           )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
 
-        {/* Chart */}
-        <div className="h-[300px]">
-          <ChartContainer config={chartConfig} className="h-full w-full">
-            <ResponsiveContainer>
-              <ComposedChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(24, 95%, 53%)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="hsl(24, 95%, 53%)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis
-                  dataKey="month"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  className="text-xs"
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  className="text-xs"
-                  tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value}
-                />
-                <Tooltip
-                  content={
-                    <ChartTooltipContent
-                      formatter={(value, name) => [
-                        formatCurrency(value as number),
-                        name === "revenue" ? "Revenus" : "Prévision",
-                      ]}
-                    />
-                  }
-                />
-                <Legend
-                  formatter={(value) => (
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      {value === "revenue" ? "Revenus" : "Prévision"}
-                    </span>
-                  )}
-                />
-                {chartType === "bar" ? (
-                  <>
-                    <Bar
-                      dataKey="revenue"
-                      fill="hsl(24, 95%, 53%)"
-                      radius={[4, 4, 0, 0]}
-                      barSize={24}
-                    />
-                    {showPrediction && (
-                      <Bar
-                        dataKey="predicted"
-                        fill="hsl(142, 76%, 36%)"
-                        radius={[4, 4, 0, 0]}
-                        barSize={24}
-                        opacity={0.6}
-                      />
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <Line
-                      type="monotone"
-                      dataKey="revenue"
-                      stroke="hsl(24, 95%, 53%)"
-                      strokeWidth={3}
-                      dot={{ fill: "hsl(24, 95%, 53%)", strokeWidth: 2, r: 4 }}
-                      activeDot={{ r: 6, strokeWidth: 2 }}
-                    />
-                    {showPrediction && (
-                      <Line
-                        type="monotone"
-                        dataKey="predicted"
-                        stroke="hsl(142, 76%, 36%)"
-                        strokeWidth={2}
-                        strokeDasharray="5 5"
-                        dot={{ fill: "hsl(142, 76%, 36%)", strokeWidth: 2, r: 3 }}
-                      />
-                    )}
-                  </>
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </ChartContainer>
+// Simple version without card wrapper
+export function RevenueChartSimple({ data, currency = "GNF" }: { data: RevenueData[]; currency?: string }) {
+  return (
+    <ChartContainer config={chartConfig} className="h-[250px] w-full">
+      <AreaChart data={data}>
+        <defs>
+          <linearGradient id="colorRevenueSimple" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
+        <XAxis dataKey="period" tickLine={false} axisLine={false} />
+        <YAxis
+          tickFormatter={(value) => {
+            if (value >= 1000000) return `${(value / 1000000).toFixed(0)}M`;
+            if (value >= 1000) return `${(value / 1000).toFixed(0)}K`;
+            return value;
+          }}
+          tickLine={false}
+          axisLine={false}
+        />
+        <ChartTooltip
+          content={({ active, payload, label }) => {
+            if (!active || !payload?.length) return null;
+            return (
+              <div className="rounded-lg border bg-background p-2 shadow-md">
+                <p className="font-medium text-sm">{label}</p>
+                <p className="text-sm text-muted-foreground">
+                  {formatCurrency(payload[0].value as number, currency)}
+                </p>
+              </div>
+            );
+          }}
+        />
+        <Area
+          type="monotone"
+          dataKey="revenue"
+          stroke="#f59e0b"
+          strokeWidth={2}
+          fill="url(#colorRevenueSimple)"
+        />
+      </AreaChart>
+    </ChartContainer>
+  );
+}
+
+// Skeleton component
+export function RevenueChartSkeleton() {
+  return (
+    <Card className="h-full">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-4 w-32 mt-1" />
+          </div>
+          <Skeleton className="h-8 w-32" />
         </div>
+      </CardHeader>
+      <CardContent>
+        <Skeleton className="h-[300px] w-full" />
       </CardContent>
     </Card>
   );

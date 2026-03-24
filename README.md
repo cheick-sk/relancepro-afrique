@@ -94,11 +94,24 @@ bun run dev
 
 ## 🚀 Déploiement Production
 
-### Vercel (Recommandé)
+### Render (Recommandé pour PostgreSQL)
+
+Le projet inclut un fichier `render.yaml` pour déploiement automatique.
+
+1. Connecter le repo GitHub à Render
+2. Créer un nouveau Blueprint
+3. Render créera automatiquement :
+   - Web Service (application)
+   - PostgreSQL Database
+   - Cron Jobs (relances, rapports, nettoyage)
+4. Configurer les variables d'environnement dans le dashboard
+
+### Vercel (Alternative)
 
 1. Connecter le repo GitHub à Vercel
 2. Configurer les variables d'environnement
 3. Déployer
+4. Ajouter une base PostgreSQL externe (Supabase, Neon)
 
 ### Variables d'environnement requises
 

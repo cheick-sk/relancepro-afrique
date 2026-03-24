@@ -1,16 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { usePWA } from "@/hooks/use-pwa";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import {
   Download,
   X,
@@ -19,357 +11,230 @@ import {
   Bell,
   Zap,
   Shield,
-  ArrowRight,
-  Check,
+  CheckCircle,
 } from "lucide-react";
 
-// Helper function to check if prompt was dismissed
-function getIsDismissed(key: string, maxHours: number): boolean {
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  readonly userChoice: Promise<{
+    outcome: "accepted" | "dismissed";
+    platform: string;
+  }>;
+  prompt(): Promise<void>;
+}
+
+const INSTALL_BENEFITS = [
+  {
+    icon: Wifi,
+    title: "Accès hors ligne",
+    description: "Consultez vos données même sans connexion internet",
+  },
+  {
+    icon: Zap,
+    title: "Démarrage rapide",
+    description:
+      "Accédez à RelancePro en un clic depuis votre écran d'accueil",
+  },
+  {
+    icon: Bell,
+    title: "Notifications push",
+    description: "Recevez des alertes pour vos relances importantes",
+  },
+  {
+    icon: Shield,
+    title: "Données sécurisées",
+    description: "Vos données sont synchronisées automatiquement",
+  },
+];
+
+// Helper function to check if app is installed
+function getIsInstalled(): boolean {
   if (typeof window === "undefined") return false;
-  const dismissedTime = localStorage.getItem(key);
+
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (window.navigator as unknown as { standalone?: boolean }).standalone ===
+      true
+  );
+}
+
+// Helper function to check if prompt was recently dismissed
+function wasRecentlyDismissed(): boolean {
+  if (typeof window === "undefined") return false;
+
+  const dismissedTime = localStorage.getItem("pwa-install-dismissed");
   if (dismissedTime) {
     const hoursSinceDismissed =
       (Date.now() - parseInt(dismissedTime)) / (1000 * 60 * 60);
-    return hoursSinceDismissed < maxHours;
+    return hoursSinceDismissed < 24;
   }
   return false;
 }
 
-interface InstallPromptProps {
-  // Callback quand l'app est installée
-  onInstalled?: () => void;
-  // Callback quand le prompt est dismissé
-  onDismissed?: () => void;
-  // Délai avant d'afficher le prompt (en ms)
-  delay?: number;
-  // Afficher automatiquement
-  autoShow?: boolean;
-}
-
-export function InstallPrompt({
-  onInstalled,
-  onDismissed,
-  delay = 3000,
-  autoShow = true,
-}: InstallPromptProps) {
-  const { canInstall, isInstalled, installApp } = usePWA();
-  const [isOpen, setIsOpen] = useState(false);
+export function InstallPrompt() {
+  const [deferredPrompt, setDeferredPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
+  const [showPrompt, setShowPrompt] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
-  
-  // Initialize dismissed state from localStorage
-  const dismissedInitially = useMemo(() => getIsDismissed("pwa-install-dismissed", 168), []);
-  const [dismissed, setDismissed] = useState(dismissedInitially);
+  const [isInstalled, setIsInstalled] = useState(getIsInstalled);
+  const [wasDismissed] = useState(wasRecentlyDismissed);
 
-  // Afficher le prompt après un délai
+  // Listen for install prompt
   useEffect(() => {
-    if (autoShow && canInstall && !isInstalled && !dismissed) {
-      const timer = setTimeout(() => setIsOpen(true), delay);
-      return () => clearTimeout(timer);
-    }
-  }, [canInstall, isInstalled, dismissed, delay, autoShow]);
+    if (typeof window === "undefined" || wasDismissed) return;
 
-  const handleInstall = useCallback(async () => {
-    setIsInstalling(true);
-    
-    try {
-      const installed = await installApp();
-      
-      if (installed) {
-        setIsOpen(false);
-        onInstalled?.();
-      }
-    } finally {
-      setIsInstalling(false);
-    }
-  }, [installApp, onInstalled]);
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      const promptEvent = e as BeforeInstallPromptEvent;
+      setDeferredPrompt(promptEvent);
 
-  const handleDismiss = useCallback(() => {
-    setIsOpen(false);
-    setDismissed(true);
-    localStorage.setItem("pwa-install-dismissed", Date.now().toString());
-    onDismissed?.();
-  }, [onDismissed]);
+      // Show prompt after delay
+      setTimeout(() => {
+        setShowPrompt(true);
+      }, 5000);
+    };
 
-  // Ne rien afficher si déjà installé ou pas installable
-  if (isInstalled || !canInstall) {
-    return null;
-  }
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setIsInstalled(true);
+      setShowPrompt(false);
+    };
 
-  return (
-    <Sheet open={isOpen} onOpenChange={setIsOpen}>
-      <SheetContent side="bottom" className="h-auto rounded-t-2xl">
-        <SheetHeader className="text-left pb-2">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-lg">
-              <Download className="h-7 w-7 text-white" />
-            </div>
-            <div>
-              <SheetTitle className="text-xl">Installer RelancePro</SheetTitle>
-              <SheetDescription className="text-sm">
-                Ajoutez l&apos;application à votre écran d&apos;accueil
-              </SheetDescription>
-            </div>
-          </div>
-        </SheetHeader>
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
 
-        <div className="py-4 space-y-4">
-          {/* Benefits */}
-          <div className="grid grid-cols-2 gap-3">
-            <BenefitItem
-              icon={Zap}
-              title="Accès rapide"
-              description="Lancez l'app en un clic"
-            />
-            <BenefitItem
-              icon={Wifi}
-              title="Hors ligne"
-              description="Fonctionne sans internet"
-            />
-            <BenefitItem
-              icon={Bell}
-              title="Notifications"
-              description="Alertes en temps réel"
-            />
-            <BenefitItem
-              icon={Shield}
-              title="Sécurisé"
-              description="Données protégées"
-            />
-          </div>
-
-          {/* Actions */}
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <Button
-              size="lg"
-              className="flex-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white"
-              onClick={handleInstall}
-              disabled={isInstalling}
-            >
-              {isInstalling ? (
-                <>
-                  <div className="h-5 w-5 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Installation...
-                </>
-              ) : (
-                <>
-                  <Download className="h-5 w-5 mr-2" />
-                  Installer
-                </>
-              )}
-            </Button>
-            <Button
-              size="lg"
-              variant="ghost"
-              className="sm:w-auto"
-              onClick={handleDismiss}
-            >
-              Plus tard
-            </Button>
-          </div>
-
-          {/* Instructions iOS */}
-          <p className="text-xs text-muted-foreground text-center">
-            Sur iOS : Appuyez sur Partager {">"} Sur l&apos;écran d&apos;accueil
-          </p>
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-// Composant pour afficher un bénéfice
-function BenefitItem({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: React.ElementType;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex items-start gap-3 p-3 rounded-xl bg-orange-50 dark:bg-orange-950/30">
-      <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/50 flex items-center justify-center flex-shrink-0">
-        <Icon className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-      </div>
-      <div>
-        <p className="font-medium text-sm text-gray-900 dark:text-white">{title}</p>
-        <p className="text-xs text-gray-600 dark:text-gray-400">{description}</p>
-      </div>
-    </div>
-  );
-}
-
-// Composant bouton d'installation compact
-export function InstallButton({
-  className,
-  variant = "default",
-  size = "default",
-}: {
-  className?: string;
-  variant?: "default" | "outline" | "ghost";
-  size?: "default" | "sm" | "lg" | "icon";
-}) {
-  const { canInstall, isInstalled, installApp } = usePWA();
-  const [isInstalling, setIsInstalling] = useState(false);
-
-  if (isInstalled || !canInstall) {
-    return null;
-  }
+    return () => {
+      window.removeEventListener(
+        "beforeinstallprompt",
+        handleBeforeInstallPrompt
+      );
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, [wasDismissed]);
 
   const handleInstall = async () => {
+    if (!deferredPrompt) return;
+
     setIsInstalling(true);
+
     try {
-      await installApp();
+      await deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+
+      if (outcome === "accepted") {
+        setShowPrompt(false);
+        setIsInstalled(true);
+      }
+
+      setDeferredPrompt(null);
+    } catch (error) {
+      console.error("Install error:", error);
     } finally {
       setIsInstalling(false);
     }
   };
-
-  return (
-    <Button
-      variant={variant}
-      size={size}
-      className={className}
-      onClick={handleInstall}
-      disabled={isInstalling}
-    >
-      {isInstalling ? (
-        <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-      ) : (
-        <>
-          <Download className="h-4 w-4 mr-2" />
-          Installer
-        </>
-      )}
-    </Button>
-  );
-}
-
-// Bannière d'installation pour le haut de page
-export function InstallBanner() {
-  const { canInstall, isInstalled, installApp } = usePWA();
-  const [visible, setVisible] = useState(false);
-  
-  // Initialize dismissed state from localStorage
-  const dismissedInitially = useMemo(() => getIsDismissed("pwa-banner-dismissed", 24), []);
-  const [dismissed, setDismissed] = useState(dismissedInitially);
-
-  useEffect(() => {
-    if (canInstall && !isInstalled && !dismissed) {
-      const timer = setTimeout(() => setVisible(true), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [canInstall, isInstalled, dismissed]);
 
   const handleDismiss = () => {
-    setVisible(false);
-    setDismissed(true);
-    localStorage.setItem("pwa-banner-dismissed", Date.now().toString());
+    setShowPrompt(false);
+    localStorage.setItem("pwa-install-dismissed", Date.now().toString());
   };
 
-  if (!visible || isInstalled || !canInstall) {
+  // Don't show if already installed, recently dismissed, or no prompt available
+  if (isInstalled || wasDismissed || !showPrompt || !deferredPrompt) {
     return null;
   }
 
   return (
-    <div className="fixed top-16 left-0 right-0 z-40 bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-lg">
-      <div className="max-w-7xl mx-auto px-4 py-2">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Smartphone className="h-5 w-5 flex-shrink-0" />
-            <p className="text-sm font-medium">
-              Installez RelancePro pour un accès rapide et hors ligne
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <Card className="max-w-md w-full border-orange-200 bg-white dark:bg-gray-900 shadow-2xl animate-in fade-in zoom-in duration-300">
+        <CardContent className="p-0">
+          {/* Header */}
+          <div className="relative bg-gradient-to-r from-orange-500 to-amber-500 p-6 rounded-t-lg">
             <Button
-              size="sm"
-              variant="secondary"
-              className="bg-white text-orange-600 hover:bg-orange-50"
-              onClick={installApp}
-            >
-              Installer
-              <ArrowRight className="h-4 w-4 ml-1" />
-            </Button>
-            <Button
-              size="icon"
               variant="ghost"
-              className="h-8 w-8 text-white hover:bg-white/20"
+              size="icon"
+              className="absolute top-2 right-2 text-white/80 hover:text-white hover:bg-white/20"
               onClick={handleDismiss}
             >
-              <X className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Carte d'installation pour les paramètres
-export function InstallCard() {
-  const { canInstall, isInstalled, installApp } = usePWA();
-  const [isInstalling, setIsInstalling] = useState(false);
-
-  const handleInstall = async () => {
-    setIsInstalling(true);
-    try {
-      await installApp();
-    } finally {
-      setIsInstalling(false);
-    }
-  };
-
-  return (
-    <Card className="border-orange-200 dark:border-orange-900">
-      <CardContent className="p-6">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center">
-            <Smartphone className="h-6 w-6 text-white" />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
-              Application mobile
-            </h3>
-            {isInstalled ? (
-              <div className="mt-2 flex items-center gap-2 text-green-600 dark:text-green-400">
-                <Check className="h-4 w-4" />
-                <span className="text-sm">Application installée</span>
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-white/20">
+                <Smartphone className="h-8 w-8 text-white" />
               </div>
-            ) : canInstall ? (
-              <>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  Installez l&apos;application pour un accès rapide et les fonctionnalités hors ligne.
+              <div>
+                <h2 className="text-xl font-bold text-white">
+                  Installer l&apos;application
+                </h2>
+                <p className="text-white/80 text-sm">
+                  RelancePro Africa sur votre appareil
                 </p>
-                <Button
-                  size="sm"
-                  className="mt-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white"
-                  onClick={handleInstall}
-                  disabled={isInstalling}
-                >
-                  {isInstalling ? (
-                    <>
-                      <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      Installation...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4 mr-2" />
-                      Installer l&apos;application
-                    </>
-                  )}
-                </Button>
-              </>
-            ) : (
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                L&apos;application peut être installée depuis le menu de votre navigateur.
-              </p>
-            )}
+              </div>
+            </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+
+          {/* Benefits */}
+          <div className="p-6">
+            <p className="text-gray-600 dark:text-gray-300 mb-4">
+              Installez RelancePro Africa pour une meilleure expérience :
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              {INSTALL_BENEFITS.map((benefit, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-2 p-3 rounded-lg bg-orange-50 dark:bg-orange-900/20"
+                >
+                  <benefit.icon className="h-5 w-5 text-orange-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-medium text-sm text-gray-900 dark:text-white">
+                      {benefit.title}
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {benefit.description}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <Button
+                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white"
+                onClick={handleInstall}
+                disabled={isInstalling}
+              >
+                {isInstalling ? (
+                  <>
+                    <Download className="h-4 w-4 mr-2 animate-bounce" />
+                    Installation...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 mr-2" />
+                    Installer
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                className="border-gray-200"
+                onClick={handleDismiss}
+              >
+                Plus tard
+              </Button>
+            </div>
+
+            {/* Trust indicator */}
+            <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <CheckCircle className="h-3 w-3" />
+              <span>Installation gratuite et sécurisée</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
