@@ -9,6 +9,8 @@ import { authOptions } from '@/lib/auth/config';
 import { db } from '@/lib/db';
 import { hasPermission, canAddMember, getAssignableRoles, TeamRole } from '@/lib/auth/roles';
 import { randomUUID } from 'crypto';
+import { sendTeamInvitation } from '@/lib/services/email';
+import logger from '@/lib/logger';
 
 // Durée de validité d'une invitation (7 jours)
 const INVITATION_EXPIRY_DAYS = 7;

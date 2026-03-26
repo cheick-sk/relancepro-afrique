@@ -211,13 +211,19 @@ export default function LitigationDetailPage({ params }: { params: Promise<{ id:
   }
 
   const handleEditEvent = async (id: string, event: Partial<any>) => {
-    // TODO: Implement edit event endpoint
-    console.log('Edit event:', id, event)
+    const response = await fetch(`/api/litigation/${litigation?.id}/events`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventId: id, ...event })
+    })
+    if (response.ok) fetchLitigation()
   }
 
   const handleDeleteEvent = async (id: string) => {
-    // TODO: Implement delete event endpoint
-    console.log('Delete event:', id)
+    const response = await fetch(`/api/litigation/${litigation?.id}/events?eventId=${id}`, {
+      method: 'DELETE'
+    })
+    if (response.ok) fetchLitigation()
   }
 
   // Party handlers

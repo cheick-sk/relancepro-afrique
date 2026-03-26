@@ -63,8 +63,7 @@ export default function ClientsPage() {
   };
 
   const handleView = (client: Client) => {
-    // TODO: Navigate to client detail page
-    console.log("View client:", client);
+    router.push(`/clients/${client.id}`);
   };
 
   const handleDelete = (client: Client) => {
