@@ -1,0 +1,189 @@
+# RelancePro Africa - Render Deployment Configuration
+# https://render.com/docs/blueprint-spec
+
+services:
+  # Web Service - Main Application
+  - type: web
+    name: relancepro-africa
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter # Change to 'standard' or 'pro' for production
+    region: oregon # or frankfurt for Europe
+    branch: master
+    healthCheckPath: /api/health
+    numInstances: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: DIRECT_DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: NEXTAUTH_URL
+        value: https://relancepro-africa.onrender.com
+      - key: CRON_SECRET
+        generateValue: true
+      - key: CRON_ENABLED
+        value: "true"
+      - key: RESEND_API_KEY
+        sync: false # Set manually in Render dashboard
+      - key: RESEND_FROM_EMAIL
+        value: noreply@relancepro.africa
+      - key: PAYSTACK_SECRET_KEY
+        sync: false # Set manually in Render dashboard
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false # Set manually in Render dashboard
+      - key: WHATSAPP_API_KEY
+        sync: false # Set manually in Render dashboard (Whapi.cloud)
+      - key: TWILIO_ACCOUNT_SID
+        sync: false # Set manually in Render dashboard
+      - key: TWILIO_AUTH_TOKEN
+        sync: false # Set manually in Render dashboard
+      - key: TWILIO_PHONE_NUMBER
+        sync: false # Set manually in Render dashboard
+      - key: AFRICASTALKING_API_KEY
+        sync: false # Set manually in Render dashboard
+      - key: AFRICASTALKING_USERNAME
+        sync: false # Set manually in Render dashboard
+      - key: AFRICASTALKING_SENDER_ID
+        sync: false # Set manually in Render dashboard
+
+  # Cron Job - Automatic Reminders (every hour)
+  - type: cron
+    name: relancepro-reminders
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: master
+    schedule: "0 * * * *" # Every hour
+    buildCommand: npm install && npx prisma generate
+    startCommand: npx prisma migrate deploy && node scripts/cron-reminders.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: DIRECT_DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: CRON_SECRET
+        fromService:
+          name: relancepro-africa
+          envVarKey: CRON_SECRET
+      - key: CRON_JOB_TYPE
+        value: reminders
+
+  # Cron Job - Payment Predictions (daily at 2 AM)
+  - type: cron
+    name: relancepro-predictions
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: master
+    schedule: "0 2 * * *" # Daily at 2 AM
+    buildCommand: npm install && npx prisma generate
+    startCommand: npx prisma migrate deploy && node scripts/cron-predictions.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: DIRECT_DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: CRON_SECRET
+        fromService:
+          name: relancepro-africa
+          envVarKey: CRON_SECRET
+      - key: CRON_JOB_TYPE
+        value: predictions
+
+  # Cron Job - Weekly Reports (Mondays at 9 AM)
+  - type: cron
+    name: relancepro-reports
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: master
+    schedule: "0 9 * * 1" # Mondays at 9 AM
+    buildCommand: npm install && npx prisma generate
+    startCommand: npx prisma migrate deploy && node scripts/cron-reports.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: DIRECT_DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: CRON_SECRET
+        fromService:
+          name: relancepro-africa
+          envVarKey: CRON_SECRET
+      - key: CRON_JOB_TYPE
+        value: reports
+
+  # Cron Job - Demo Cleanup (daily at 3 AM)
+  - type: cron
+    name: relancepro-cleanup
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: master
+    schedule: "0 3 * * *" # Daily at 3 AM
+    buildCommand: npm install && npx prisma generate
+    startCommand: npx prisma migrate deploy && node scripts/cron-cleanup.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: DIRECT_DATABASE_URL
+        fromDatabase:
+          name: relancepro-db
+          property: connectionString
+      - key: CRON_SECRET
+        fromService:
+          name: relancepro-africa
+          envVarKey: CRON_SECRET
+      - key: CRON_JOB_TYPE
+        value: cleanup
+
+# Database - PostgreSQL
+databases:
+  - name: relancepro-db
+    databaseName: relancepro
+    user: relancepro_user
+    plan: starter # Change to 'standard' or 'pro' for production
+    region: oregon # or frankfurt for Europe
+    postgresMajorVersion: 15
+
+# Environment Groups (for shared variables)
+envVarGroups:
+  - name: relancepro-common
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_NAME
+        value: RelancePro Africa
+      - key: DEFAULT_CURRENCY
+        value: GNF
+      - key: DEFAULT_LOCALE
+        value: fr

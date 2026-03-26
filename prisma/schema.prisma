@@ -1,0 +1,1550 @@
+// RelancePro Africa - Schema Prisma
+// Plateforme de gestion des créances clients en Afrique
+// Support: SQLite (dev) / PostgreSQL (production)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// =====================================================
+// TABLE TEAMS - Équipes d'entreprise
+// =====================================================
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  
+  // Logo de l'équipe
+  logoUrl   String?
+  
+  // Plan d'abonnement de l'équipe
+  subscriptionPlan String   @default("starter") // starter, business, enterprise
+  
+  // Limitations selon le plan
+  maxMembers Int      @default(1) // Starter: 1, Business: 5, Enterprise: unlimited
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  owner       Profile       @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     TeamMember[]
+  invitations Invitation[]
+  auditLogs   AuditLog[]
+  
+  @@unique([ownerId])
+  @@index([ownerId])
+}
+
+// =====================================================
+// TABLE TEAM MEMBERS - Membres d'une équipe
+// =====================================================
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  userId    String
+  role      String   // owner, admin, manager, agent, viewer
+  
+  // Invitation tracking
+  invitedBy String?
+  invitedAt DateTime @default(now())
+  acceptedAt DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  team Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@index([role])
+}
+
+// =====================================================
+// TABLE INVITATIONS - Invitations à rejoindre une équipe
+// =====================================================
+model Invitation {
+  id        String   @id @default(cuid())
+  teamId    String
+  email     String
+  role      String   // admin, manager, agent, viewer
+  
+  // Token unique pour l'invitation
+  token     String   @unique
+  
+  // Statut de l'invitation
+  status    String   @default("pending") // pending, accepted, declined
+  
+  // Expiration
+  expiresAt DateTime
+  acceptedAt DateTime?
+  declinedAt DateTime?
+  
+  // Qui a envoyé l'invitation
+  invitedBy String
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  team Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  
+  @@index([teamId])
+  @@index([email])
+  @@index([token])
+  @@index([expiresAt])
+  @@index([status])
+}
+
+// =====================================================
+// TABLE PROFILES - Utilisateurs de l'application
+// =====================================================
+model Profile {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String?  // Hashé avec bcrypt
+  name          String?
+  companyName   String?  // Nom de l'entreprise
+  phone         String?  // Téléphone de contact
+  avatarUrl     String?
+  
+  // Rôle global (pour les admins système)
+  role          String   @default("user") // user, admin
+  
+  // Team et rôle dans l'équipe
+  teamId        String?
+  teamRole      String?  // owner, admin, manager, agent, viewer (rôle au sein de l'équipe)
+  
+  // Configuration WhatsApp (chiffré)
+  whatsappApiKey String? // Clé API Whapi.cloud (chiffré)
+  
+  // Configuration Email (Resend) (chiffré)
+  resendApiKey  String?
+  
+  // Devise préférée
+  preferredCurrency String @default("GNF")
+  preferredLanguage String @default("fr")
+  
+  // Abonnement Paystack
+  subscriptionStatus String  @default("free") // free, demo, active, expired
+  subscriptionPlan   String? // starter, business, enterprise
+  subscriptionEnd    DateTime?
+  paystackCustomerId String?
+  paystackSubId      String?
+  
+  // Mode démo
+  demoStartedAt   DateTime?
+  demoExpiresAt   DateTime?
+  
+  // Limitations (pour mode démo)
+  clientsLimit    Int      @default(10)
+  remindersLimit  Int      @default(50)
+  remindersUsed   Int      @default(0)
+  
+  // =====================================================
+  // Two-Factor Authentication (2FA)
+  // =====================================================
+  twoFactorEnabled     Boolean   @default(false)
+  twoFactorSecret      String?   // Secret TOTP chiffré
+  twoFactorBackupCodes String?   // Codes de récupération (JSON chiffré)
+  twoFactorEnabledAt   DateTime? // Date d'activation du 2FA
+  
+  // =====================================================
+  // Champs de sécurité
+  // =====================================================
+  lastLoginAt        DateTime?
+  lastLoginIp        String?
+  failedLoginAttempts Int      @default(0)
+  lockedUntil        DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  ownedTeam    Team?         @relation("TeamOwner")
+  teamMemberships TeamMember[]
+  clients    Client[]
+  debts      Debt[]
+  reminders  Reminder[]
+  settings   Settings?
+  payments   Payment[]
+  webhooks   Webhook[]
+  notifications Notification[]
+  auditLogs  AuditLog[]
+  sessions   Session[]
+  reminderQueue ReminderQueue[]
+  reminderLogs  ReminderLog[]
+  pushSubscriptions PushSubscription[]
+  integrations Integration[]
+  portalMessages PortalMessage[]
+  smsLogs    SmsLog[]
+  voiceCalls VoiceCall[]
+  smsSettings SmsSettings?
+  templates  Template[]
+  scheduledReminders ScheduledReminder[]
+  apiKeys    ApiKey[]
+  invoices   Invoice[]
+  litigations Litigation[]
+  creditReports CreditReport[]
+  creditInquiries CreditInquiry[]
+  
+  @@index([email])
+  @@index([subscriptionStatus])
+  @@index([twoFactorEnabled])
+  @@index([teamId])
+}
+
+// =====================================================
+// TABLE CLIENTS - Débiteurs (clients à relancer)
+// =====================================================
+model Client {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Informations du client
+  name      String                    // Nom du client/débiteur
+  email     String?                   // Email (optionnel)
+  phone     String?                   // WhatsApp/Téléphone (optionnel)
+  company   String?                   // Nom de l'entreprise (si B2B)
+  address   String?                   // Adresse
+  notes     String?                   // Notes additionnelles
+  
+  // Score de risque (calculé par IA)
+  riskScore Int?    // 0-100
+  riskLevel String? // low, medium, high
+  
+  // Analyse comportementale IA
+  paymentPattern        String? // JSON: patterns de paiement
+  preferredContactChannel String? // email, whatsapp, sms
+  optimalContactTime    String? // Heure optimale, e.g., "09:00"
+  
+  // Statut
+  status    String  @default("active") // active, inactive, blacklisted
+  
+  // =====================================================
+  // Credit Scoring Fields
+  // =====================================================
+  creditScore       Int?      // 0-1000 credit score
+  creditRating      String?   // AAA, AA, A, BBB, BB, B, CCC, CC, C, D
+  creditLimit       Float?    // Recommended max credit amount
+  paymentHistory    String?   // JSON: last 12 months payment history
+  creditInquiries   Int       @default(0) // Number of credit inquiries
+  lastCreditReview  DateTime? // Last time credit was reviewed
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile   Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  debts     Debt[]
+  reminders Reminder[]
+  reminderQueue ReminderQueue[]
+  portalTokens PortalToken[]
+  clientPayments ClientPayment[]
+  portalMessages PortalMessage[]
+  scheduledReminders ScheduledReminder[]
+  invoices   Invoice[]
+  creditReports CreditReport[]
+  creditInquiriesMade CreditInquiry[]
+  paymentHistoryRecords PaymentHistory[]
+  litigations Litigation[]
+  
+  @@index([profileId])
+  @@index([email])
+  @@index([phone])
+  @@index([status])
+  @@index([riskScore])
+  @@index([creditScore])
+  @@index([creditRating])
+}
+
+// =====================================================
+// TABLE DEBTS - Créances / Dettes
+// =====================================================
+model Debt {
+  id        String  @id @default(cuid())
+  clientId  String
+  profileId String
+  
+  // Détails de la créance
+  reference   String?   // Numéro de facture/référence
+  description String?   // Description de la créance
+  amount      Float     // Montant dû
+  currency    String    @default("GNF") // GNF, XOF, XAF, EUR, USD, etc.
+  
+  // Dates importantes
+  issueDate   DateTime? // Date d'émission
+  dueDate     DateTime  // Date d'échéance
+  
+  // Statut
+  status      String    @default("pending") // pending, paid, partial, disputed, cancelled
+  paidAmount  Float     @default(0)         // Montant déjà payé
+  paidDate    DateTime? // Date de paiement complet
+  
+  // Relance
+  autoRemindEnabled Boolean   @default(true) // Activer/désactiver les relances automatiques pour cette créance
+  reminderCount   Int       @default(0)
+  lastReminderAt  DateTime?
+  nextReminderAt  DateTime?
+  
+  // Prédiction IA
+  paymentProbability Float? // 0-100%
+  predictedPayDate   DateTime?
+  
+  // Prédictions IA avancées
+  predictionFactors   String?   // JSON: facteurs influençant la prédiction
+  lastPredictionAt   DateTime? // Dernière mise à jour de la prédiction
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  client    Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile   Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  reminders Reminder[]
+  reminderQueue ReminderQueue[]
+  clientPayments ClientPayment[]
+  scheduledReminders ScheduledReminder[]
+  invoices   Invoice[]
+  litigations Litigation[]
+  
+  @@index([clientId])
+  @@index([profileId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// =====================================================
+// TABLE REMINDERS - Historique des relances
+// =====================================================
+model Reminder {
+  id        String  @id @default(cuid())
+  debtId    String
+  clientId  String
+  profileId String
+  
+  // Type de relance
+  type      String  // 'email' ou 'whatsapp'
+  
+  // Contenu
+  subject   String? // Sujet (pour email)
+  message   String  // Corps du message
+  
+  // Ton utilisé (IA)
+  tone      String? // formal, friendly, urgent
+  
+  // Statut de l'envoi
+  status    String  @default("pending") // pending, sent, failed, delivered, opened
+  error     String? // Message d'erreur si échec
+  
+  // Réponse du client
+  responseReceived Boolean @default(false)
+  responseMessage  String?
+  respondedAt      DateTime?
+  
+  sentAt    DateTime?
+  deliveredAt DateTime?
+  openedAt  DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  debt   Debt    @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  client Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([debtId])
+  @@index([clientId])
+  @@index([profileId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE SETTINGS - Configuration utilisateur
+// =====================================================
+model Settings {
+  id        String  @id @default(cuid())
+  profileId String  @unique
+  
+  // Configuration Email
+  emailSignature   String?
+  emailSenderName  String?
+  emailReplyTo     String?
+  
+  // Configuration WhatsApp
+  whatsappBusinessName String?
+  whatsappGreeting     String?
+  
+  // Modèles de messages
+  emailTemplateReminder1  String? // Premier rappel
+  emailTemplateReminder2  String? // Deuxième rappel
+  emailTemplateReminder3  String? // Dernier rappel
+  whatsappTemplateReminder1 String?
+  whatsappTemplateReminder2 String?
+  whatsappTemplateReminder3 String?
+  
+  // Paramètres de relance automatique
+  autoRemindEnabled   Boolean @default(true)
+  reminderDay1        Int     @default(3)  // Jours après échéance pour 1ère relance
+  reminderDay2        Int     @default(7)  // Jours pour 2ème relance
+  reminderDay3        Int     @default(14) // Jours pour 3ème relance
+  
+  // Additional reminder settings
+  skipWeekends        Boolean @default(true)
+  reminderStartTime   String  @default("09:00")
+  reminderEndTime     String  @default("18:00")
+  maxReminders        Int     @default(3)
+  
+  // Notifications
+  emailNotificationsEnabled Boolean @default(true)
+  soundNotificationsEnabled Boolean @default(true)
+  
+  // =====================================================
+  // SMS & Voice Settings
+  // =====================================================
+  smsProvider      String?  // twilio, africastalking, auto
+  smsSenderId      String?  // Sender ID personnalisé
+  voiceEnabled     Boolean  @default(true) // Activer les appels vocaux
+  
+  // =====================================================
+  // Push Notification Preferences
+  // =====================================================
+  pushNotificationsEnabled Boolean @default(false) // Master toggle
+  pushDebtCreated          Boolean @default(true)  // Nouvelles créances
+  pushPaymentReceived      Boolean @default(true)  // Paiements reçus
+  pushReminderSent         Boolean @default(true)  // Relances envoyées
+  pushDailyDigest          Boolean @default(false) // Rappels quotidiens
+  pushRiskAlert            Boolean @default(true)  // Alertes de risque
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+}
+
+// =====================================================
+// TABLE PAYMENTS - Historique des paiements (Paystack)
+// =====================================================
+model Payment {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Détails Paystack
+  paystackRef    String  @unique // Référence Paystack
+  paystackTransId String? // ID transaction Paystack
+  
+  // Montant
+  amount    Float
+  currency  String  @default("GNF")
+  
+  // Statut
+  status    String  @default("pending") // pending, success, failed
+  plan      String? // starter, business, enterprise
+  
+  // Métadonnées
+  metadata  String? // JSON additionnel
+  
+  paidAt    DateTime?
+  createdAt DateTime @default(now())
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE WEBHOOKS - Webhooks configurés par l'utilisateur
+// =====================================================
+model Webhook {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Configuration
+  name      String
+  url       String
+  secret    String?
+  events    String  // JSON array of events
+  active    Boolean @default(true)
+  
+  // Statistiques
+  lastTriggeredAt DateTime?
+  failureCount    Int     @default(0)
+  successCount    Int     @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([active])
+}
+
+// =====================================================
+// TABLE NOTIFICATIONS - Notifications in-app
+// =====================================================
+model Notification {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Contenu
+  type      String  // success, error, warning, info
+  title     String
+  message   String
+  actionUrl String?
+  actionLabel String?
+  
+  // Statut
+  read      Boolean @default(false)
+  readAt    DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE AUDIT LOGS - Journal d'audit de sécurité
+// =====================================================
+model AuditLog {
+  id        String  @id @default(cuid())
+  profileId String?
+  teamId    String?
+  
+  // Action effectuée (format: category.action)
+  action    String
+  
+  // Type d'entité concernée
+  entityType String?
+  entityId   String?
+  
+  // Détails de l'action (JSON)
+  details   String?
+  
+  // Changements avant/après (JSON)
+  oldValues String?
+  newValues String?
+  
+  // Métadonnées de la requête
+  ipAddress String?
+  userAgent String?
+  
+  // Statut de l'action
+  status    String  @default("success") // success, failed, pending
+  
+  // Message d'erreur si échec
+  errorMessage String?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  profile Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  team   Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  
+  @@index([profileId])
+  @@index([teamId])
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@index([status])
+  @@index([ipAddress])
+}
+
+// =====================================================
+// TABLE SESSIONS - Sessions actives des utilisateurs
+// =====================================================
+model Session {
+  id        String  @id @default(cuid())
+  userId    String
+  token     String  @unique // Session token
+  
+  // Informations de session
+  userAgent String?
+  ip        String?
+  device    String? // Desktop, Mobile, Tablet
+  browser   String? // Chrome, Firefox, Safari, etc.
+  os        String? // Windows, macOS, Linux, iOS, Android
+  
+  // Localisation approximative
+  country   String?
+  city      String?
+  
+  // Gestion de la session
+  lastActive DateTime @default(now())
+  expiresAt  DateTime
+  isRevoked  Boolean  @default(false)
+  revokedAt  DateTime?
+  revokedBy  String?  // User ID who revoked the session
+  
+  // Trusted device (pour 2FA)
+  isTrusted  Boolean  @default(false)
+  trustedUntil DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@index([isRevoked])
+}
+
+// =====================================================
+// TABLE REMINDER QUEUE - File d'attente des relances planifiées
+// =====================================================
+model ReminderQueue {
+  id        String  @id @default(cuid())
+  debtId    String
+  clientId  String
+  profileId String
+  
+  // Planification
+  scheduledAt DateTime  // Date et heure planifiées
+  reminderType String   // 'first', 'second', 'third'
+  channel     String    // 'email', 'whatsapp', 'both'
+  
+  // Statut
+  status      String    @default("pending") // pending, processing, sent, failed, cancelled
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  
+  // Contenu généré (par IA)
+  subject     String?   // Sujet (pour email)
+  message     String?   // Message généré
+  tone        String?   // formal, friendly, urgent
+  
+  // Résultat
+  error       String?   // Message d'erreur si échec
+  sentAt      DateTime? // Date d'envoi réel
+  
+  // Métadonnées
+  priority    Int       @default(0) // 0 = normal, 1 = haute, 2 = urgente
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  debt   Debt    @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  client Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([debtId])
+  @@index([clientId])
+  @@index([profileId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([reminderType])
+}
+
+// =====================================================
+// TABLE REMINDER LOGS - Journal des actions de relance
+// =====================================================
+model ReminderLog {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Action
+  action    String  // scheduled, sent, failed, cancelled, processed
+  entityType String? // Debt, Client, ReminderQueue
+  entityId   String?
+  
+  // Détails
+  details   String? // JSON avec les détails de l'action
+  
+  // Résultat
+  success   Boolean @default(true)
+  error     String?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE PUSH SUBSCRIPTIONS - Abonnements aux notifications push
+// =====================================================
+model PushSubscription {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Push subscription details
+  endpoint  String  @unique
+  p256dh    String  // Public key for encryption
+  auth      String  // Auth secret
+  
+  // Device information
+  userAgent  String?
+  deviceType String? // desktop, mobile, tablet
+  
+  // Notification preferences
+  notifyPaymentReminders Boolean @default(true)  // Rappels de paiement
+  notifyNewDebts         Boolean @default(true)  // Nouvelles créances
+  notifyRemindersSent    Boolean @default(true)  // Relances envoyées
+  notifySubscription     Boolean @default(true)  // Abonnement
+  
+  // Sound and quiet hours
+  soundEnabled    Boolean @default(true)
+  quietHoursStart String? // e.g., "22:00"
+  quietHoursEnd   String? // e.g., "07:00"
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([endpoint])
+}
+
+// =====================================================
+// TABLE PORTAL TOKENS - Jetons d'accès au portail client
+// =====================================================
+model PortalToken {
+  id        String  @id @default(cuid())
+  clientId  String
+  token     String  @unique // UUID v4 token
+  
+  // Expiration et usage
+  expiresAt    DateTime  // Date d'expiration du token
+  singleUse    Boolean   @default(false) // Usage unique
+  usedAt       DateTime? // Date d'utilisation (si single use)
+  
+  // Tracking des accès
+  accessedAt   DateTime? // Dernier accès
+  accessedCount Int      @default(0) // Nombre d'accès
+  accessIps    String?   // JSON array of IP addresses
+  
+  // Métadonnées
+  createdBy    String?   // ID de l'utilisateur qui a créé le token
+  note         String?   // Note optionnelle
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@index([clientId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+// =====================================================
+// TABLE CLIENT PAYMENTS - Paiements effectués via le portail
+// =====================================================
+model ClientPayment {
+  id        String  @id @default(cuid())
+  clientId  String
+  debtId    String?
+  
+  // Détails Paystack
+  paystackRef    String  @unique // Référence Paystack
+  paystackTransId String? // ID transaction Paystack
+  
+  // Montant
+  amount    Float
+  currency  String  @default("GNF")
+  
+  // Statut
+  status    String  @default("pending") // pending, success, failed
+  paymentMethod String? // card, mobile_money, bank_transfer
+  
+  // Métadonnées
+  metadata  String? // JSON additionnel
+  paidAt    DateTime?
+  
+  // Portail
+  portalTokenId String? // Token utilisé pour le paiement
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  debt   Debt?   @relation(fields: [debtId], references: [id], onDelete: SetNull)
+  
+  @@index([clientId])
+  @@index([debtId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE PORTAL MESSAGES - Messages envoyés via le portail
+// =====================================================
+model PortalMessage {
+  id        String  @id @default(cuid())
+  clientId  String
+  profileId String
+  
+  // Type de message
+  type      String  // contact, payment_plan_request, dispute
+  
+  // Contenu
+  subject   String?
+  message   String
+  debtId    String? // Si lié à une créance spécifique
+  
+  // Documents attachés
+  attachments String? // JSON array of file URLs
+  
+  // Statut
+  status    String  @default("pending") // pending, read, responded, closed
+  
+  // Réponse
+  response  String?
+  respondedAt DateTime?
+  respondedBy  String? // ID de l'utilisateur qui a répondu
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([clientId])
+  @@index([profileId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE INTEGRATIONS - Accounting software integrations
+// =====================================================
+model Integration {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Integration type
+  type      String  // quickbooks, xero, sage, wave
+  
+  // OAuth tokens (encrypted)
+  accessToken      String?
+  refreshToken     String?
+  expiresAt        DateTime?
+  tokenType        String?
+  
+  // Connection details
+  status           String  @default("disconnected") // connected, disconnected, expired, error
+  connectedAt      DateTime?
+  disconnectedAt   DateTime?
+  
+  // External account info
+  externalId       String?  // Company ID / Tenant ID
+  externalName     String?  // Company name
+  
+  // Sync settings
+  syncDirection    String  @default("import") // import, export, both
+  autoSync         Boolean @default(false)
+  syncFrequency    String  @default("daily") // hourly, daily, weekly, manual
+  lastSyncAt       DateTime?
+  lastSyncStatus   String? // success, failed, partial
+  lastSyncError    String?
+  nextSyncAt       DateTime?
+  
+  // Field mapping configuration (JSON)
+  fieldMapping     String?
+  
+  // Sync statistics
+  totalSynced      Int     @default(0)
+  lastSyncCount    Int     @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  syncLogs IntegrationSyncLog[]
+  
+  @@unique([profileId, type])
+  @@index([profileId])
+  @@index([type])
+  @@index([status])
+}
+
+// =====================================================
+// TABLE INTEGRATION SYNC LOGS - History of sync operations
+// =====================================================
+model IntegrationSyncLog {
+  id             String   @id @default(cuid())
+  integrationId  String
+  
+  // Sync details
+  syncType       String   // full, incremental, manual
+  direction      String   // import, export, both
+  
+  // Status
+  status         String   @default("pending") // pending, running, success, failed, partial
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+  
+  // Results
+  invoicesImported  Int @default(0)
+  invoicesExported  Int @default(0)
+  clientsImported   Int @default(0)
+  clientsExported   Int @default(0)
+  paymentsImported  Int @default(0)
+  paymentsExported  Int @default(0)
+  
+  // Errors
+  errorMessage    String?
+  errorDetails    String?  // JSON with detailed errors
+  
+  // Relations
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  
+  @@index([integrationId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+// =====================================================
+// TABLE SMS LOGS - Historique des SMS envoyés
+// =====================================================
+model SmsLog {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Destinataire et message
+  to        String  // Numéro de téléphone
+  message   String  // Contenu du SMS
+  
+  // Fournisseur
+  provider  String  // 'twilio' ou 'africastalking'
+  messageId String? // ID du message chez le fournisseur
+  
+  // Statut
+  status    String  @default("pending") // pending, queued, sent, delivered, failed, undelivered
+  
+  // Coût
+  cost      Float   @default(0) // Coût en GNF
+  segments  Int     @default(1) // Nombre de segments SMS
+  
+  // Erreur
+  errorCode    String?
+  errorMessage String?
+  
+  // Métadonnées
+  clientId  String? // Si lié à un client
+  debtId    String? // Si lié à une créance
+  reminderId String? // Si lié à une relance
+  
+  // Dates
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([to])
+  @@index([provider])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE VOICE CALLS - Historique des appels vocaux
+// =====================================================
+model VoiceCall {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Destinataire
+  to        String  // Numéro de téléphone
+  
+  // Type d'appel
+  callType  String  // 'tts' (text-to-speech) ou 'audio' (pre-recorded)
+  
+  // Contenu
+  message   String? // Message TTS
+  audioUrl  String? // URL du fichier audio (si callType = 'audio')
+  
+  // Fournisseur
+  provider  String  // 'twilio' ou 'africastalking'
+  callId    String? // ID de l'appel chez le fournisseur
+  
+  // Statut
+  status    String  @default("queued") // queued, ringing, in-progress, completed, failed, busy, no-answer
+  
+  // Durée et coût
+  duration  Int     @default(0) // Durée en secondes
+  cost      Float   @default(0) // Coût en GNF
+  
+  // Enregistrement
+  recordingUrl String? // URL de l'enregistrement de l'appel
+  
+  // Erreur
+  errorCode    String?
+  errorMessage String?
+  
+  // Langue et voix
+  language String? // fr-FR, en-US, etc.
+  voice    String? // alice, man, woman
+  
+  // Planification
+  scheduledAt DateTime? // Date/heure planifiée (null si immédiat)
+  
+  // Métadonnées
+  clientId   String? // Si lié à un client
+  debtId     String? // Si lié à une créance
+  reminderId String? // Si lié à une relance
+  
+  // Dates
+  initiatedAt DateTime? // Début de l'appel
+  endedAt     DateTime? // Fin de l'appel
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([to])
+  @@index([provider])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE SMS SETTINGS - Configuration SMS des utilisateurs
+// =====================================================
+model SmsSettings {
+  id        String  @id @default(cuid())
+  profileId String  @unique
+  
+  // Twilio Configuration (chiffré)
+  twilioAccountSid  String?
+  twilioAuthToken   String?
+  twilioPhoneNumber String?
+  twilioEnabled     Boolean @default(false)
+  
+  // Africa's Talking Configuration (chiffré)
+  africastalkingApiKey   String?
+  africastalkingUsername String?
+  africastalkingSenderId String?
+  africastalkingEnabled  Boolean @default(false)
+  
+  // Préférences
+  defaultProvider  String  @default("auto") // auto, twilio, africastalking
+  senderIdEnabled  Boolean @default(false)
+  customSenderId   String?
+  
+  // Limites et alertes
+  monthlySmsLimit   Int     @default(1000)
+  monthlySmsUsed    Int     @default(0)
+  balanceAlertThreshold Float? // Alerte si le solde descend sous ce seuil
+  
+  // Voice settings
+  voiceEnabled      Boolean @default(true) // Activer les appels vocaux
+  voiceDefaultLanguage String @default("fr-FR") // Langue par défaut pour les appels
+  
+  // Dates
+  lastBalanceCheck DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+}
+
+// =====================================================
+// TABLE TEMPLATES - Modèles de messages de relance
+// =====================================================
+model Template {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Informations du template
+  name      String                    // Nom du template
+  type      String                    // email, whatsapp, sms
+  category  String                    // reminder1, reminder2, reminder3, custom
+  
+  // Contenu
+  subject   String?                   // Objet (pour email)
+  body      String                    // Corps du message
+  
+  // Style et langue
+  tone      String  @default("formal")    // formal, friendly, urgent
+  language  String  @default("fr")        // fr, en
+  
+  // Statut
+  isDefault Boolean @default(false)   // Template par défaut pour cette catégorie
+  isActive  Boolean @default(true)    // Template actif/inactif
+  usageCount Int    @default(0)       // Nombre d'utilisations
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([type])
+  @@index([category])
+  @@index([isDefault])
+  @@index([tone])
+  @@index([language])
+}
+
+// =====================================================
+// TABLE SCHEDULED REMINDERS - Relances planifiées avancées
+// =====================================================
+model ScheduledReminder {
+  id        String  @id @default(cuid())
+  debtId    String
+  clientId  String
+  profileId String
+  
+  // Planification
+  scheduledAt DateTime                // Date et heure planifiées
+  type        String                  // 'email', 'whatsapp'
+  
+  // Statut
+  status      String  @default("pending") // pending, sent, failed, cancelled
+  priority    String  @default("normal")  // urgent, normal, low
+  
+  // Tentatives
+  retryCount  Int     @default(0)
+  maxAttempts Int     @default(3)
+  lastError   String?
+  
+  // Contenu généré
+  subject     String?
+  message     String?
+  
+  // Résultat
+  sentAt      DateTime?
+  
+  // Métadonnées
+  timezone    String  @default("Africa/Conakry") // Fuseau horaire
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  debt   Debt    @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  client Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([debtId])
+  @@index([clientId])
+  @@index([profileId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([priority])
+}
+
+// =====================================================
+// TABLE API KEYS - Clés API pour l'accès public
+// =====================================================
+model ApiKey {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Key details
+  name      String                    // Friendly name for the key
+  key       String  @unique           // The actual API key (hashed)
+  keyPrefix String                    // First 8 chars for identification (e.g., "rpa_xxxx")
+  
+  // Permissions
+  scopes    String                    // JSON array of scopes: ["clients:read", "debts:write", ...]
+  
+  // Rate limiting
+  rateLimit Int     @default(100)     // Requests per minute
+  
+  // Usage tracking
+  lastUsedAt DateTime?
+  usageCount Int     @default(0)      // Total requests made
+  
+  // Status
+  active    Boolean @default(true)
+  
+  // Expiration
+  expiresAt DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile   Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  usage     ApiUsage[]
+  
+  @@index([profileId])
+  @@index([key])
+  @@index([keyPrefix])
+  @@index([active])
+  @@index([expiresAt])
+}
+
+// =====================================================
+// TABLE API USAGE - Journal d'utilisation de l'API
+// =====================================================
+model ApiUsage {
+  id        String  @id @default(cuid())
+  apiKeyId  String
+  
+  // Request details
+  endpoint  String                    // e.g., "/api/v1/clients"
+  method    String                    // GET, POST, PUT, DELETE
+  
+  // Response details
+  statusCode Int                      // HTTP status code
+  responseTime Int                    // Response time in ms
+  
+  // Metadata
+  ip        String?
+  userAgent String?
+  
+  // Error tracking
+  error     String?                   // Error message if failed
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  apiKey    ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  
+  @@index([apiKeyId])
+  @@index([endpoint])
+  @@index([method])
+  @@index([statusCode])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE INVOICES - Factures
+// =====================================================
+model Invoice {
+  id        String  @id @default(cuid())
+  profileId String
+  clientId  String
+  debtId    String?  // Lien optionnel vers une créance
+  
+  // Numéro de facture (auto-généré)
+  number    String  @unique // Format: INV-{YEAR}-{MONTH}-{SEQUENCE}
+  
+  // Statut
+  status    String  @default("draft") // draft, sent, paid, overdue, cancelled
+  
+  // Dates
+  issueDate DateTime @default(now())  // Date d'émission
+  dueDate   DateTime                    // Date d'échéance
+  
+  // Montants
+  subtotal  Float   @default(0)        // Sous-total HT
+  tax       Float   @default(0)        // Taxe (TVA)
+  total     Float   @default(0)        // Total TTC
+  
+  // Devise
+  currency  String  @default("GNF")
+  
+  // Notes et conditions
+  notes     String?                     // Notes additionnelles
+  terms     String?                     // Conditions de paiement
+  
+  // Dates de statut
+  paidAt      DateTime?
+  cancelledAt DateTime?
+  sentAt      DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  debt    Debt?   @relation(fields: [debtId], references: [id], onDelete: SetNull)
+  items   InvoiceItem[]
+  
+  @@index([profileId])
+  @@index([clientId])
+  @@index([debtId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([number])
+}
+
+// =====================================================
+// TABLE INVOICE ITEMS - Lignes de facture
+// =====================================================
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  
+  description String
+  quantity    Int     @default(1)
+  unitPrice   Float
+  total       Float
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  @@index([invoiceId])
+}
+
+// =====================================================
+// TABLE LITIGATION - Dossiers de contentieux
+// =====================================================
+model Litigation {
+  id        String  @id @default(cuid())
+  profileId String
+  
+  // Référence du dossier
+  reference String  @unique
+  
+  // Détails
+  title       String
+  description String?
+  
+  // Client concerné
+  clientId String
+  debtId   String?  // Créance associée
+  
+  // Type de contentieux
+  type      String  // mediation, arbitration, court, collection_notice
+  
+  // Statut
+  status    String  @default("open") // open, in_progress, settled, closed, dismissed
+  
+  // Montants
+  claimedAmount  Float  // Montant réclamé
+  recoveredAmount Float  @default(0) // Montant récupéré
+  legalFees      Float  @default(0) // Frais juridiques
+  
+  // Dates importantes
+  openedAt     DateTime @default(now())
+  closedAt     DateTime?
+  nextHearing  DateTime?
+  
+  // Juridiction
+  court        String?
+  judge        String?
+  caseNumber   String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  debt    Debt?   @relation(fields: [debtId], references: [id], onDelete: SetNull)
+  parties LitigationParty[]
+  documents LitigationDocument[]
+  events  LitigationEvent[]
+  costs   LitigationCost[]
+  
+  @@index([profileId])
+  @@index([clientId])
+  @@index([debtId])
+  @@index([status])
+  @@index([type])
+  @@index([reference])
+}
+
+// =====================================================
+// TABLE LITIGATION PARTIES - Parties au contentieux
+// =====================================================
+model LitigationParty {
+  id           String  @id @default(cuid())
+  litigationId String
+  
+  name         String
+  type         String  // plaintiff, defendant, witness, lawyer, judge
+  email        String?
+  phone        String?
+  address      String?
+  notes        String?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  litigation Litigation @relation(fields: [litigationId], references: [id], onDelete: Cascade)
+  
+  @@index([litigationId])
+}
+
+// =====================================================
+// TABLE LITIGATION DOCUMENTS - Documents de contentieux
+// =====================================================
+model LitigationDocument {
+  id           String  @id @default(cuid())
+  litigationId String
+  
+  name         String
+  type         String  // contract, invoice, correspondence, court_filing, evidence
+  url          String
+  uploadedBy   String?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  litigation Litigation @relation(fields: [litigationId], references: [id], onDelete: Cascade)
+  
+  @@index([litigationId])
+}
+
+// =====================================================
+// TABLE LITIGATION EVENTS - Événements de contentieux
+// =====================================================
+model LitigationEvent {
+  id           String  @id @default(cuid())
+  litigationId String
+  
+  title        String
+  description  String?
+  date         DateTime
+  type         String  // filing, hearing, ruling, settlement, payment
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  litigation Litigation @relation(fields: [litigationId], references: [id], onDelete: Cascade)
+  
+  @@index([litigationId])
+  @@index([date])
+}
+
+// =====================================================
+// TABLE LITIGATION COSTS - Frais de contentieux
+// =====================================================
+model LitigationCost {
+  id           String  @id @default(cuid())
+  litigationId String
+  
+  description  String
+  amount       Float
+  currency     String  @default("GNF")
+  date         DateTime @default(now())
+  type         String  // legal_fee, court_fee, travel, other
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  litigation Litigation @relation(fields: [litigationId], references: [id], onDelete: Cascade)
+  
+  @@index([litigationId])
+}
+
+// =====================================================
+// TABLE CREDIT REPORTS - Rapports de crédit
+// =====================================================
+model CreditReport {
+  id        String  @id @default(cuid())
+  clientId  String
+  profileId String
+  
+  // Score
+  score     Int     // 0-1000
+  rating    String  // AAA, AA, A, BBB, BB, B, CCC, CC, C, D
+  
+  // Facteurs
+  paymentHistory    Float  // Poids dans le score
+  creditUtilization Float
+  creditAge         Float
+  totalDebt         Float
+  recentInquiries   Int
+  
+  // Analyse
+  strengths     String? // JSON array
+  weaknesses    String? // JSON array
+  recommendations String? // JSON array
+  
+  // Métadonnées
+  validUntil DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  @@index([clientId])
+  @@index([profileId])
+  @@index([score])
+  @@index([rating])
+}
+
+// =====================================================
+// TABLE CREDIT INQUIRIES - Demandes de crédit
+// =====================================================
+model CreditInquiry {
+  id           String  @id @default(cuid())
+  profileId    String  // Qui a fait la demande
+  clientId     String  // Sur quel client
+  purpose      String  // credit_check, background_check, other
+  
+  // Consentement
+  consentGiven Boolean @default(false)
+  consentAt    DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  profile       Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  client        Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@index([profileId])
+  @@index([clientId])
+  @@index([createdAt])
+}
+
+// =====================================================
+// TABLE PAYMENT HISTORY - Historique des paiements
+// =====================================================
+model PaymentHistory {
+  id        String  @id @default(cuid())
+  clientId  String
+  
+  amount    Float
+  currency  String  @default("GNF")
+  date      DateTime @default(now())
+  status    String  @default("completed") // completed, pending, failed
+  reference String?
+  notes     String?
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@index([clientId])
+  @@index([date])
+  @@index([status])
+}

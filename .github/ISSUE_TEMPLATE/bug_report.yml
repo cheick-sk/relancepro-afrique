@@ -1,0 +1,211 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in RelancePro Africa
+title: "[BUG]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+projects: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! 
+        Please fill out all required fields to help us resolve the issue quickly.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I have searched the existing issues to make sure this is not a duplicate
+          required: true
+        - label: I have read the documentation and this appears to be a bug
+          required: true
+        - label: I am using the latest version of RelancePro Africa
+          required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severe is this bug?
+      options:
+        - Critical - System is unusable
+        - High - Major feature broken
+        - Medium - Feature partially broken
+        - Low - Minor issue
+      default: 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which component is affected?
+      options:
+        - Authentication
+        - Dashboard
+        - Clients
+        - Debts
+        - Reminders
+        - SMS Integration
+        - Email Integration
+        - Analytics
+        - Reports
+        - Settings
+        - Portal
+        - API
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is
+      placeholder: "When I try to..., the system..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the behavior
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen
+      placeholder: "I expected the system to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: A clear and concise description of what actually happened
+      placeholder: "Instead, the system..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots to help explain your problem
+      placeholder: "Drag and drop screenshots here..."
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs
+      description: Please copy and paste any relevant error logs
+      placeholder: |
+        ```
+        Paste error logs here
+        ```
+      render: shell
+
+  - type: input
+    id: url
+    attributes:
+      label: Affected URL
+      description: The URL where the bug was encountered (if applicable)
+      placeholder: "https://relancepro.africa/..."
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      description: Which browser(s) are you experiencing the issue on?
+      multiple: true
+      options:
+        - Chrome
+        - Firefox
+        - Safari
+        - Edge
+        - Opera
+        - Mobile (iOS)
+        - Mobile (Android)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: browser_version
+    attributes:
+      label: Browser Version
+      description: The version of your browser
+      placeholder: "e.g., Chrome 120.0.6099.109"
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: Which operating system are you using?
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - iOS
+        - Android
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device Type
+      description: What type of device are you using?
+      options:
+        - Desktop
+        - Laptop
+        - Tablet
+        - Mobile Phone
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here
+      placeholder: "Any other information that might be helpful..."
+
+  - type: checkboxes
+    id: willing-to-help
+    attributes:
+      label: Willing to Help
+      options:
+        - label: I am willing to submit a pull request to fix this issue
+          required: false
+        - label: I can provide more information if needed
+          required: false
+
+  - type: input
+    id: user_id
+    attributes:
+      label: User ID (Optional)
+      description: Your RelancePro Africa user ID (if you're a registered user)
+      placeholder: "user_xxx"
+
+  - type: input
+    id: organization
+    attributes:
+      label: Organization (Optional)
+      description: Your organization name (if applicable)
+      placeholder: "My Company Ltd"

@@ -1,0 +1,209 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for RelancePro Africa
+title: "[FEATURE]: "
+labels: ["enhancement", "needs-triage"]
+assignees: []
+projects: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! 
+        Please fill out all required fields to help us understand your request.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I have searched the existing issues to make sure this feature hasn't been requested before
+          required: true
+        - label: I have read the documentation and this feature is not currently available
+          required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature to you?
+      options:
+        - Critical - Blocking my workflow
+        - High - Would significantly improve productivity
+        - Medium - Nice to have
+        - Low - Minor improvement
+      default: 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which component would this feature affect?
+      options:
+        - Authentication
+        - Dashboard
+        - Clients
+        - Debts
+        - Reminders
+        - SMS Integration
+        - Email Integration
+        - WhatsApp Integration
+        - Voice Calls
+        - Analytics
+        - Reports
+        - Templates
+        - Settings
+        - Portal
+        - API
+        - Integrations
+        - Team Management
+        - Notifications
+        - Mobile App
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem are you trying to solve? What limitation are you facing?
+      placeholder: |
+        Currently, I am unable to... 
+        This is frustrating because...
+        The current workaround is...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution you'd like to see
+      placeholder: |
+        I would like to be able to...
+        The feature should allow me to...
+        An ideal solution would be...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: |
+        I considered using... but it doesn't work because...
+        A possible alternative would be...
+
+  - type: textarea
+    id: use_cases
+    attributes:
+      label: Use Cases
+      description: Describe specific use cases where this feature would be helpful
+      placeholder: |
+        **Use Case 1:**
+        As a [role], I want to [action] so that [benefit]
+        
+        **Use Case 2:**
+        As a [role], I want to [action] so that [benefit]
+    validations:
+      required: true
+
+  - type: textarea
+    id: user_stories
+    attributes:
+      label: User Stories
+      description: Format your request as user stories if possible
+      placeholder: |
+        - As a debt collector, I want to... so that...
+        - As a manager, I want to... so that...
+        - As a client, I want to... so that...
+
+  - type: textarea
+    id: mockups
+    attributes:
+      label: Mockups or Screenshots
+      description: If you have any mockups, wireframes, or screenshots, please share them here
+      placeholder: "Drag and drop images here..."
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples from Other Products
+      description: Are there examples of this feature in other products you can reference?
+      placeholder: |
+        - [Product Name] has a similar feature where...
+        - You can see an example at [URL]
+
+  - type: dropdown
+    id: business_impact
+    attributes:
+      label: Business Impact
+      description: How would this feature impact your business operations?
+      options:
+        - Significant time savings (hours per week)
+        - Moderate time savings (minutes per day)
+        - Improved accuracy/reliability
+        - Better user experience
+        - New revenue opportunity
+        - Compliance requirement
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: estimated_users
+    attributes:
+      label: Estimated Number of Users Affected
+      description: How many users do you think would benefit from this feature?
+      placeholder: "e.g., All users, 50%, Only large organizations"
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Usage Frequency
+      description: How often would you use this feature?
+      options:
+        - Multiple times per day
+        - Once per day
+        - A few times per week
+        - Once per week
+        - Occasionally
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willing-to-contribute
+    attributes:
+      label: Willing to Contribute
+      options:
+        - label: I am willing to submit a pull request to implement this feature
+          required: false
+        - label: I am willing to help test this feature when implemented
+          required: false
+        - label: I am willing to provide more detailed requirements
+          required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context or screenshots about the feature request here
+      placeholder: "Any other information that might be helpful..."
+
+  - type: input
+    id: organization
+    attributes:
+      label: Organization (Optional)
+      description: Your organization name (if applicable)
+      placeholder: "My Company Ltd"
+
+  - type: input
+    id: contact
+    attributes:
+      label: Contact Information (Optional)
+      description: Your email or phone if you'd like us to follow up with you
+      placeholder: "email@example.com"
